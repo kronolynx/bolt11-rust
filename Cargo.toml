@@ -1,0 +1,7 @@
+[package]
+name = "lightning_payencode"
+version = "0.1.0"
+authors = ["Johann Og <johann@stampery.com>"]
+
+[dependencies]
+itertools = "0.7.6"
