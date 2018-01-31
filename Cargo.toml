@@ -5,3 +5,5 @@ authors = ["Johann Og <johann@stampery.com>"]
 
 [dependencies]
 itertools = "0.7.6"
+bech32 = "0.2.2"
+hex="0.3.1"
