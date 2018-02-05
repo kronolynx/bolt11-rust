@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use bech32::Bech32;
+use num::BigUint;
 
 /// Given an amount in bitcoin, shorten it
 ///
@@ -72,4 +74,22 @@ fn shorten_amount_test() {
         assert_eq!(k, shorten_amount(v));
         assert_eq!(v, unshorten_amount(shorten_amount(v)));
     }
+}
+
+/// Shim vectors of 5-bit values returned by BECH32
+fn u5_to_bitarray(data: Vec<u8>) -> String {
+    let u5 = data.iter()
+        .fold(BigUint::from(0u64), |mut s, b| {
+            s <<= 5;
+            s |= BigUint::from(*b);
+            s
+    });
+    u5.to_str_radix(16)
+}
+
+#[test]
+fn u5_to_bitarray_test(){
+    let bytes = vec![3u8, 1, 17, 17, 8, 15, 0, 20, 24, 20, 11, 6, 16, 1, 5, 29, 3, 4, 16, 3, 6, 21, 22, 26, 2, 13, 22, 9, 16, 21, 19, 24, 25, 21, 6, 18, 15, 8, 13, 24, 24, 24, 25, 9, 12, 1, 4, 16, 6, 9, 17, 0];
+    let hex = "1863143c14c5166804bd19203356da136c985678cd4d27a1b8c63296049032620";
+    assert_eq!(u5_to_bitarray2(bytes), hex);
 }
