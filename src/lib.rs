@@ -12,6 +12,8 @@
 extern crate num;
 extern crate hex;
 extern crate bech32;
+#[macro_use]
+mod macros;
 mod lnaddr;
 
 
