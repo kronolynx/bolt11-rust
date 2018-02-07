@@ -26,12 +26,15 @@ fn shorten_amount_aux(amount: u64, units: &[&str]) -> String {
 
 /// Given a shortened amount, convert it into a decimal
 /// BOLT #11:
-/// The following `multiplier` letters are defined:
+/// The following **multiplier** letters are defined:
 ///
-///* `m` (milli): multiply by 0.001
-///* `u` (micro): multiply by 0.000001
-///* `n` (nano): multiply by 0.000000001
-///* `p` (pico): multiply by 0.000000000001
+/// 'm' (milli): multiply by 0.001
+/// 'u' (micro): multiply by 0.000001
+/// 'n' (nano): multiply by 0.000000001
+/// 'p' (pico): multiply by 0.000000000001
+///
+/// # Arguments
+/// * `amount` - A string that holds the amount to shorten
 pub fn unshorten_amount(amount: String) -> f64 {
     let units: HashMap<char, i32> = hashmap! {
         'p' => 12,
@@ -77,9 +80,12 @@ fn shorten_amount_test() {
     }
 }
 
-/// Shim in a hexstring vectors of 5-bit values returned by BECH32
-fn bitarray_to_u5(data: Vec<u8>) -> String {
-    let u5 = data.iter()
+/// Shim in a hex string vectors of 5-bit values returned by BECH32
+///
+/// # Arguments
+/// * `bitarray` - Vector that hold the 5-bit values
+fn bitarray_to_u5(bitarray: Vec<u8>) -> String {
+    let u5 = bitarray.iter()
         .fold(BigUint::from(0u64), |mut s, b| {
             s <<= 5;
             s |= BigUint::from(*b);
@@ -88,9 +94,12 @@ fn bitarray_to_u5(data: Vec<u8>) -> String {
     u5.to_str_radix(16)
 }
 
-/// Convert hextring containing 5-bit values to u8 vector
-fn u5_to_bitarray(hex: &str) -> Result<Vec<u8>, &str> {
-    BigUint::parse_bytes(hex.as_bytes(), 16)
+/// Convert hex tring containing 5-bit values to u8 vector
+///
+/// # Arguments
+/// * `hex_string` - Hex string that contains the 5-bit values
+fn u5_to_bitarray(hex_string: &str) -> Result<Vec<u8>, &str> {
+    BigUint::parse_bytes(hex_string.as_bytes(), 16)
         .ok_or("Error parsing hexstring")
         .and_then(|mut u5| {
             let mask = BigUint::from(31u8);
@@ -112,7 +121,10 @@ fn u5_to_bitarray(hex: &str) -> Result<Vec<u8>, &str> {
 
 #[test]
 fn u5_test() {
-    let bytes = vec![3u8, 1, 17, 17, 8, 15, 0, 20, 24, 20, 11, 6, 16, 1, 5, 29, 3, 4, 16, 3, 6, 21, 22, 26, 2, 13, 22, 9, 16, 21, 19, 24, 25, 21, 6, 18, 15, 8, 13, 24, 24, 24, 25, 9, 12, 1, 4, 16, 6, 9, 17, 0];
+    let bytes =
+        vec![3u8, 1, 17, 17, 8, 15, 0, 20, 24, 20, 11, 6, 16, 1, 5, 29, 3, 4, 16, 3, 6, 21, 22, 26,
+             2, 13, 22, 9, 16, 21, 19, 24, 25, 21, 6, 18, 15, 8, 13, 24, 24, 24, 25, 9, 12, 1, 4,
+             16, 6, 9, 17, 0];
     let hex = "1863143c14c5166804bd19203356da136c985678cd4d27a1b8c63296049032620";
     assert_eq!(bitarray_to_u5(bytes), hex);
     assert_eq!(bitarray_to_u5(u5_to_bitarray(hex).unwrap()), hex);
