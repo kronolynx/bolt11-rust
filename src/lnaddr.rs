@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use num::traits::*;
-use num::bigint::BigUint;
 use std::num::ParseFloatError;
+use std::{error, fmt};
+use std::collections::HashMap;
+use utils::*;
 
 /// BOLT #11:
 /// The following **multiplier** letters are defined:
@@ -83,51 +83,86 @@ fn shorten_amount_test() {
     }
 }
 
-/// Shim in a hex string vectors of 5-bit values returned by BECH32
+type ConvertResult = Result<Vec<u8>, BitConversionError>;
+
+/// Convert between bit sizes
 ///
-/// # Arguments
-/// * `bitarray` - Vector that hold the 5-bit values
-fn bitarray_to_u5(bitarray: Vec<u8>) -> String {
-    let u5 = bitarray.iter().fold(BigUint::from(0u64), |mut s, b| {
-        s <<= 5;
-        s |= BigUint::from(*b);
-        s
-    });
-    u5.to_str_radix(16)
+/// # Panics
+/// Function will panic if attempting to convert `from` or `to` a bit size that
+/// is larger than 8 bits.
+fn convert_bits(data: &Vec<u8>, from: u32, to: u32, pad: bool) -> ConvertResult {
+    if from > 8 || to > 8 {
+        panic!("convert_bits `from` and `to` parameters greater than 8");
+    }
+    let mut acc: u32 = 0;
+    let mut bits: u32 = 0;
+    let mut ret: Vec<u8> = Vec::new();
+    let maxv: u32 = (1 << to) - 1;
+    for value in data {
+        let v: u32 = *value as u32;
+        if (v >> from) != 0 {
+            // Input value exceeds `from` bit size
+            return Err(BitConversionError::InvalidInputValue(v as u8));
+        }
+        acc = (acc << from) | v;
+        bits += from;
+        while bits >= to {
+            bits -= to;
+            ret.push(((acc >> bits) & maxv) as u8);
+        }
+    }
+    if pad {
+        if bits > 0 {
+            ret.push(((acc << (to - bits)) & maxv) as u8);
+        }
+    } else if bits >= from || ((acc << (to - bits)) & maxv) != 0 {
+        return Err(BitConversionError::InvalidPadding);
+    }
+    Ok(ret)
 }
 
-/// Convert hex tring containing 5-bit values to u8 vector
-///
-/// # Arguments
-/// * `hex_string` - Hex string that contains the 5-bit values
-fn u5_to_bitarray(hex_string: &str) -> Result<Vec<u8>, &str> {
-    BigUint::parse_bytes(hex_string.as_bytes(), 16)
-        .ok_or("Error parsing hexstring")
-        .and_then(|mut u5| {
-            let mask = BigUint::from(31u8);
-            let mut bitarray = Vec::<u8>::new();
-            while !u5.is_zero() {
-                let bit = &u5 & &mask;
-                if let Some(b) = bit.to_u8() {
-                    bitarray.push(b);
-                } else {
-                    return Err("Invalid u5");
-                }
-                u5 >>= 5;
-            }
-            bitarray.reverse();
-            Ok(bitarray)
-        })
+/// Convert a vector containing u5 values to u8
+fn bits_u5_to_u8(bytes: &Vec<u8>) -> ConvertResult {
+    convert_bits(bytes, 5, 8, false)
+}
+/// Convert a vector containing u8 values to u5
+fn bits_u8_to_u5(bytes: &Vec<u8>) -> ConvertResult {
+    convert_bits(bytes, 8, 5, false)
 }
 
 #[test]
 fn u5_test() {
-    let bytes = vec![
-        3u8, 1, 17, 17, 8, 15, 0, 20, 24, 20, 11, 6, 16, 1, 5, 29, 3, 4, 16, 3, 6, 21, 22, 26, 2,
-        13, 22, 9, 16, 21, 19, 24, 25, 21, 6, 18, 15, 8, 13, 24, 24, 24, 25, 9, 12, 1, 4, 16, 6, 9,
-        17, 0,
-    ];
-    let hex = "1863143c14c5166804bd19203356da136c985678cd4d27a1b8c63296049032620";
-    assert_eq!(bitarray_to_u5(bytes), hex);
-    assert_eq!(bitarray_to_u5(u5_to_bitarray(hex).unwrap()), hex);
+    let u5_vec = vec![14, 20, 15, 7, 13, 26, 0, 25, 18, 6, 11, 13, 8, 21, 4, 20, 3, 17, 2, 29, 3, 12, 29, 3, 4, 15, 24, 20, 6, 14, 30, 22];
+    let u8_vec = vec![117, 30, 118, 232, 25, 145, 150, 212, 84, 148, 28, 69, 209, 179, 163, 35, 241, 67, 59, 214];
+
+    assert!(bits_u5_to_u8(&u5_vec).unwrap().eq(&u8_vec));
+    assert!(bits_u8_to_u5(&u8_vec).unwrap().eq(&u5_vec))
 }
+
+/// Error types during bit conversion
+#[derive(PartialEq, Debug)]
+pub enum BitConversionError {
+    /// Input value exceeds "from bits" size
+    InvalidInputValue(u8),
+    /// Invalid padding values in data
+    InvalidPadding,
+}
+
+impl fmt::Display for BitConversionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            BitConversionError::InvalidInputValue(b) => write!(f, "invalid input value ({})", b),
+            BitConversionError::InvalidPadding => write!(f, "invalid padding"),
+        }
+    }
+}
+
+impl error::Error for BitConversionError {
+    fn description(&self) -> &str {
+        match *self {
+            BitConversionError::InvalidInputValue(_) => "invalid input value",
+            BitConversionError::InvalidPadding => "invalid padding",
+        }
+    }
+}
+
