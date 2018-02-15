@@ -3,8 +3,10 @@
 use num::bigint::BigUint;
 use std::{error, fmt};
 
+pub type U5 = u8;
+
 ///Vector containing 5-bit values
-pub struct VecU5(Vec<u8>);
+pub struct VecU5(Vec<U5>);
 
 impl fmt::Display for VecU5 {
     fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
@@ -14,7 +16,7 @@ impl fmt::Display for VecU5 {
 }
 
 impl VecU5 {
-    fn val(&self) -> &Vec<u8> {
+    fn val(&self) -> &Vec<U5> {
         &self.0
     }
     /// convert a vector of 5-bit values to hex-string
