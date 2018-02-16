@@ -12,7 +12,7 @@ pub struct VecU5;
 
 impl VecU5 {
     /// convert a vector of 5-bit values to hex-string
-    fn to_hex(bytes: &Vec<U5>) -> String {
+    pub fn to_hex(bytes: &Vec<U5>) -> String {
         let u5 = bytes.iter().fold(BigUint::from(0u64), |mut s, b| {
             s <<= 5;
             s |= BigUint::from(*b);
@@ -21,7 +21,7 @@ impl VecU5 {
         u5.to_str_radix(16)
     }
     /// Convert a vector containing u5 values to u8
-    fn to_u8(bytes: &Vec<U5>) -> ConvertResult {
+    pub fn to_u8(bytes: &Vec<U5>) -> ConvertResult {
         convert_bits(bytes, 5, 8, false)
     }
 }
@@ -31,7 +31,7 @@ pub struct VecU8;
 
 impl VecU8 {
     /// Convert a vector containing u8 values to u5
-    fn to_u5(bytes: &Vec<U5>) -> ConvertResult {
+    pub fn to_u5(bytes: &Vec<U5>) -> ConvertResult {
         convert_bits(bytes, 8, 5, false)
     }
 }
