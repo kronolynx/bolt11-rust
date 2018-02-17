@@ -1,7 +1,7 @@
 use std::num::ParseFloatError;
 use std::collections::HashMap;
-use utils::convert_bits;
-use types::{ConvertResult, U5};
+use types::{BitConversionError, ConvertResult, U5, VecU5, VecU8};
+use bech32::Bech32;
 
 /// BOLT #11:
 /// The following **multiplier** letters are defined:
@@ -65,14 +65,63 @@ pub fn decode_amount(amount: &str) -> Result<f64, ParseFloatError> {
         _ => amount.parse::<f64>(),
     }
 }
-
-/// Convert a vector containing u5 values to u8
-fn bits_u5_to_u8(bytes: &Vec<U5>) -> ConvertResult {
-    convert_bits(bytes, 5, 8, false)
+/// Payment Hash Tag
+///
+/// # Arguments
+/// * `hash` payment hash
+struct PaymentHashTag {
+    hash: Vec<u8>,
 }
-/// Convert a vector containing u8 values to u5
-fn bits_u8_to_u5(bytes: &Vec<u8>) -> ConvertResult {
-    convert_bits(bytes, 8, 5, false)
+
+/// Description Tag
+/// # Arguments
+/// * `description` a free-format string that will be included in the payment request
+struct DescriptionTag {
+    description: String,
+}
+
+/// Hash Tag
+/// # Arguments
+/// `hash` hash that will be included in the payment request, and can be checked against
+///  the hash of a long description, an invoice, ...
+struct DescriptionHashTag {
+    hash: Vec<u8>,
+}
+/// Tag
+pub enum Tag {
+    PaymentHashTag,
+    DescriptionTag,
+    DescriptionHashTag,
+}
+
+/// Trait for types that convert to Vec<U5>
+trait ToVecU5 {
+    fn to_vec_u5(&self) -> Result<Vec<U5>, String>;
+    // auxiliary method for to_vec_u5
+    fn to_vec_u5_result(
+        ch_value: Option<usize>,
+        bytes_result: Result<Vec<U5>, BitConversionError>,
+    ) -> Result<Vec<U5>, String> {
+        match (ch_value, bytes_result) {
+            (Some(p), Ok(bytes)) => {
+                let len = bytes.len();
+                let mut vec = vec![p as u8, (len / 32) as u8, (len % 32) as u8];
+                vec.extend(bytes);
+                Ok(vec)
+            }
+            (_, Err(err)) => Err(err.to_string()),
+            _ => Err("Invalid input".to_owned()),
+        }
+    }
+}
+
+impl ToVecU5 for PaymentHashTag {
+    fn to_vec_u5(&self) -> Result<Vec<U5>, String> {
+        let bytes: Result<Vec<U5>, BitConversionError> = VecU8::to_u5(&self.hash);
+        println!("bytes \n{:?}", bytes);
+        let p = Bech32Extra::ALPHABET.find('p');
+        PaymentHashTag::to_vec_u5_result(p, bytes)
+    }
 }
 
 /// seconds-since-1970 (35 bits, big-endian)
@@ -96,9 +145,34 @@ impl Timestamp {
     }
 }
 
+/// Things related to bech32
+struct Bech32Extra;
+
+impl Bech32Extra {
+    const ALPHABET: &'static str = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn payment_hashtag_test() {
+        let payment_hash_tag = PaymentHashTag {
+            hash: vec![
+                0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6,
+                7, 8, 9, 1, 2,
+            ],
+        };
+        let u5_hash_tag = vec![
+            1u8, 1, 20, 0, 0, 0, 16, 4, 0, 24, 4, 0, 20, 3, 0, 14, 2, 0, 9, 0, 0, 0, 16, 4, 0, 24,
+            4, 0, 20, 3, 0, 14, 2, 0, 9, 0, 0, 0, 16, 4, 0, 24, 4, 0, 20, 3, 0, 14, 2, 0, 9, 0, 4,
+            1, 0,
+        ];
+        println!("hashtag {:?}", payment_hash_tag.to_vec_u5().unwrap());
+        println!("right   {:?}", u5_hash_tag);
+        assert!(payment_hash_tag.to_vec_u5().unwrap().eq(&u5_hash_tag))
+    }
 
     #[test]
     fn encode_decode_amount_test() {
@@ -115,20 +189,6 @@ mod test {
             assert_eq!(k, encode_amount(v));
             assert_eq!(v, decode_amount(&encode_amount(v)).unwrap());
         }
-    }
-    #[test]
-    fn u5_test() {
-        let u5_vec = vec![
-            14, 20, 15, 7, 13, 26, 0, 25, 18, 6, 11, 13, 8, 21, 4, 20, 3, 17, 2, 29, 3, 12, 29, 3,
-            4, 15, 24, 20, 6, 14, 30, 22,
-        ];
-        let u8_vec = vec![
-            117, 30, 118, 232, 25, 145, 150, 212, 84, 148, 28, 69, 209, 179, 163, 35, 241, 67, 59,
-            214,
-        ];
-
-        assert!(bits_u5_to_u8(&u5_vec).unwrap().eq(&u8_vec));
-        assert!(bits_u8_to_u5(&u8_vec).unwrap().eq(&u5_vec))
     }
 
     #[test]
