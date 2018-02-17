@@ -22,7 +22,7 @@ impl VecU5 {
     }
     /// Convert a vector containing u5 values to u8
     pub fn to_u8(bytes: &Vec<U5>) -> ConvertResult {
-        convert_bits(bytes, 5, 8, false)
+        convert_bits(bytes, 5, 8, true)
     }
 }
 
@@ -32,7 +32,7 @@ pub struct VecU8;
 impl VecU8 {
     /// Convert a vector containing u8 values to u5
     pub fn to_u5(bytes: &Vec<U5>) -> ConvertResult {
-        convert_bits(bytes, 8, 5, false)
+        convert_bits(bytes, 8, 5, true)
     }
 }
 
