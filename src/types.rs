@@ -24,20 +24,11 @@ impl VecU5 {
     pub fn to_u8(bytes: &Vec<U5>) -> ConvertResult {
         convert_bits(bytes, 5, 8, true)
     }
-}
-
-/// Methods for Vec<u8>
-pub struct VecU8;
-
-impl VecU8 {
     /// Convert a vector containing u8 values to u5
-    pub fn to_u5(bytes: &Vec<U5>) -> ConvertResult {
+    pub fn from_u8(bytes: &Vec<u8>) -> ConvertResult {
         convert_bits(bytes, 8, 5, true)
     }
 }
-
-
-
 
 /// Result of vector base conversion
 pub type ConvertResult = Result<Vec<u8>, BitConversionError>;
@@ -79,5 +70,5 @@ fn u5_test() {
     ];
 
     assert!(VecU5::to_u8(&u5_vec).unwrap().eq(&u8_vec));
-    assert!(VecU8::to_u5(&u8_vec).unwrap().eq(&u5_vec));
+    assert!(VecU5::from_u8(&u8_vec).unwrap().eq(&u5_vec));
 }
