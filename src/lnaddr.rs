@@ -93,23 +93,23 @@ impl Tag {
     pub fn to_vec_u5(&self) -> Result<Vec<U5>, String> {
         match &self {
             &&Tag::PaymentHashTag { ref hash } => {
-                let bytes: Result<Vec<U5>, BitConversionError> = VecU8::to_u5(hash);
                 let p = Bech32Extra::ALPHABET.find('p');
-                Tag::to_vec_u5_result(p, bytes)
+                Tag::to_vec_u5_convert(p, hash)
             }
             &&Tag::DescriptionTag { ref description } => {
-                let bytes = VecU8::to_u5(&description.as_bytes().to_vec());
+                let data = &description.as_bytes().to_vec();
                 let d = Bech32Extra::ALPHABET.find('d');
-                Tag::to_vec_u5_result(d, bytes)
-            },
-            &&Tag::DescriptionHashTag { ref hash } => unimplemented!(),
+                Tag::to_vec_u5_convert(d, data)
+            }
+            &&Tag::DescriptionHashTag { ref hash } => {
+                let h = Bech32Extra::ALPHABET.find('h');
+                Tag::to_vec_u5_convert(h, hash)
+            }
         }
     }
     // helper for to_vec_u5
-    fn to_vec_u5_result(
-        ch_value: Option<usize>,
-        bytes_result: Result<Vec<U5>, BitConversionError>,
-    ) -> Result<Vec<U5>, String> {
+    fn to_vec_u5_convert(ch_value: Option<usize>, data: &Vec<u8>) -> Result<Vec<U5>, String> {
+        let bytes_result = VecU8::to_u5(data);
         match (ch_value, bytes_result) {
             (Some(p), Ok(bytes)) => {
                 let len = bytes.len();
@@ -182,6 +182,21 @@ mod test {
             7, 8, 26, 3, 9, 14, 12, 16, 7, 0, 28, 19, 15, 13, 9, 18, 22, 6, 29, 0,
         ];
         assert!(description_tag.to_vec_u5().unwrap().eq(&u5_description_tag))
+    }
+    #[test]
+    fn description_hash_tag_test() {
+        let description_hash_tag = Tag::DescriptionHashTag {
+            hash: vec![
+                57u8, 37, 182, 246, 126, 44, 52, 0, 54, 237, 18, 9, 61, 212, 78, 3, 104, 223, 27,
+                110, 162, 108, 83, 219, 228, 129, 31, 88, 253, 93, 184, 193,
+            ],
+        };
+        let u5_description_hash_tag = vec![
+            23, 1, 20, 7, 4, 18, 27, 13, 29, 19, 30, 5, 16, 26, 0, 0, 13, 23, 13, 2, 8, 4, 19, 27,
+            21, 2, 14, 0, 13, 20, 13, 30, 6, 27, 14, 20, 9, 22, 5, 7, 22, 31, 4, 16, 4, 15, 21, 17,
+            31, 10, 29, 23, 3, 0, 16,
+        ];
+        assert!(description_hash_tag.to_vec_u5().unwrap().eq(&u5_description_hash_tag))
     }
 
     #[test]
