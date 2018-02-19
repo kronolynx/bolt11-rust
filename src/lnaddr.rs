@@ -65,39 +65,47 @@ pub fn decode_amount(amount: &str) -> Result<f64, ParseFloatError> {
         _ => amount.parse::<f64>(),
     }
 }
-/// Payment Hash Tag
-///
-/// # Arguments
-/// * `hash` payment hash
-struct PaymentHashTag {
-    hash: Vec<u8>,
-}
 
-/// Description Tag
-/// # Arguments
-/// * `description` a free-format string that will be included in the payment request
-struct DescriptionTag {
-    description: String,
-}
-
-/// Hash Tag
-/// # Arguments
-/// `hash` hash that will be included in the payment request, and can be checked against
-///  the hash of a long description, an invoice, ...
-struct DescriptionHashTag {
-    hash: Vec<u8>,
-}
 /// Tag
 pub enum Tag {
-    PaymentHashTag,
-    DescriptionTag,
-    DescriptionHashTag,
+    /// Payment Hash Tag
+    ///
+    /// # Arguments
+    /// * `hash` payment hash
+    PaymentHashTag { hash: Vec<u8> },
+
+    /// Description Tag
+    ///
+    /// # Arguments
+    /// * `description` a free-format string that will be included in the payment request
+    DescriptionTag { description: String },
+
+    /// Hash Tag
+    ///
+    /// # Arguments
+    /// `hash` hash that will be included in the payment request, and can be checked against
+    ///  the hash of a long description, an invoice, ...
+    DescriptionHashTag { hash: Vec<u8> },
 }
 
-/// Trait for types that convert to Vec<U5>
-trait ToVecU5 {
-    fn to_vec_u5(&self) -> Result<Vec<U5>, String>;
-    // auxiliary method for to_vec_u5
+impl Tag {
+    /// convert to u5 vector
+    pub fn to_vec_u5(&self) -> Result<Vec<U5>, String> {
+        match &self {
+            &&Tag::PaymentHashTag { ref hash } => {
+                let bytes: Result<Vec<U5>, BitConversionError> = VecU8::to_u5(hash);
+                let p = Bech32Extra::ALPHABET.find('p');
+                Tag::to_vec_u5_result(p, bytes)
+            }
+            &&Tag::DescriptionTag { ref description } => {
+                let bytes = VecU8::to_u5(&description.as_bytes().to_vec());
+                let d = Bech32Extra::ALPHABET.find('d');
+                Tag::to_vec_u5_result(d, bytes)
+            },
+            &&Tag::DescriptionHashTag { ref hash } => unimplemented!(),
+        }
+    }
+    // helper for to_vec_u5
     fn to_vec_u5_result(
         ch_value: Option<usize>,
         bytes_result: Result<Vec<U5>, BitConversionError>,
@@ -112,15 +120,6 @@ trait ToVecU5 {
             (_, Err(err)) => Err(err.to_string()),
             _ => Err("Invalid input".to_owned()),
         }
-    }
-}
-
-impl ToVecU5 for PaymentHashTag {
-    fn to_vec_u5(&self) -> Result<Vec<U5>, String> {
-        let bytes: Result<Vec<U5>, BitConversionError> = VecU8::to_u5(&self.hash);
-        println!("bytes \n{:?}", bytes);
-        let p = Bech32Extra::ALPHABET.find('p');
-        PaymentHashTag::to_vec_u5_result(p, bytes)
     }
 }
 
@@ -145,7 +144,7 @@ impl Timestamp {
     }
 }
 
-/// Things related to bech32
+/// Code related to bech32
 struct Bech32Extra;
 
 impl Bech32Extra {
@@ -158,7 +157,7 @@ mod test {
 
     #[test]
     fn payment_hashtag_test() {
-        let payment_hash_tag = PaymentHashTag {
+        let payment_hash_tag = Tag::PaymentHashTag {
             hash: vec![
                 0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6,
                 7, 8, 9, 1, 2,
@@ -169,9 +168,20 @@ mod test {
             4, 0, 20, 3, 0, 14, 2, 0, 9, 0, 0, 0, 16, 4, 0, 24, 4, 0, 20, 3, 0, 14, 2, 0, 9, 0, 4,
             1, 0,
         ];
-        println!("hashtag {:?}", payment_hash_tag.to_vec_u5().unwrap());
-        println!("right   {:?}", u5_hash_tag);
         assert!(payment_hash_tag.to_vec_u5().unwrap().eq(&u5_hash_tag))
+    }
+
+    #[test]
+    fn description_tag_test() {
+        let description_tag = Tag::DescriptionTag {
+            description: "Please consider supporting this project".to_owned(),
+        };
+        let u5_description_tag = vec![
+            13, 1, 31, 10, 1, 22, 6, 10, 24, 11, 19, 12, 20, 16, 6, 6, 27, 27, 14, 14, 13, 20, 22,
+            8, 25, 11, 18, 4, 1, 25, 23, 10, 28, 3, 16, 13, 29, 25, 7, 8, 26, 11, 14, 12, 28, 16,
+            7, 8, 26, 3, 9, 14, 12, 16, 7, 0, 28, 19, 15, 13, 9, 18, 22, 6, 29, 0,
+        ];
+        assert!(description_tag.to_vec_u5().unwrap().eq(&u5_description_tag))
     }
 
     #[test]
