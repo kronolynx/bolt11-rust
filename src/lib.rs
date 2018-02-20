@@ -15,6 +15,8 @@ extern crate hex;
 extern crate itertools;
 extern crate num;
 #[macro_use]
+extern crate lazy_static;
+#[macro_use]
 mod macros;
 
 pub mod lnaddr;
