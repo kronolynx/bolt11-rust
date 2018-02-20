@@ -57,20 +57,20 @@ pub enum Tag {
     ///
     /// # Arguments
     /// * `hash` payment hash
-    PaymentHashTag { hash: Vec<u8> },
+    PaymentHash { hash: Vec<u8> },
 
     /// Description Tag
     ///
     /// # Arguments
     /// * `description` a free-format string that will be included in the payment request
-    DescriptionTag { description: String },
+    Description { description: String },
 
     /// Hash Tag
     ///
     /// # Arguments
     /// `hash` hash that will be included in the payment request, and can be checked against
     ///  the hash of a long description, an invoice, ...
-    DescriptionHashTag { hash: Vec<u8> },
+    DescriptionHash { hash: Vec<u8> },
 
     /// Fallback Payment Tag that specifies a fallback payment address to be used if LN payment
     /// cannot be processed
@@ -82,35 +82,35 @@ pub enum Tag {
     ///               - 0 (segwit hash: p2wpkh (20 bytes) or p2wsh (32 bytes))
     /// `hash`    address hash
     ///
-    FallbackAddressTag { version: u8, hash: Vec<u8> },
+    FallbackAddress { version: u8, hash: Vec<u8> },
 
     /// Expiry Date
     ///
     /// # Arguments
     /// `seconds` expiry data for this payment request
-    ExpiryTag { seconds: u64 },
+    Expiry { seconds: u64 },
 }
 
 impl Tag {
     /// convert to u5 vector
     pub fn to_vec_u5(&self) -> Result<Vec<U5>, Error> {
         match &self {
-            &&Tag::PaymentHashTag { ref hash } => {
+            &&Tag::PaymentHash { ref hash } => {
                 let bytes = VecU5::from_u8_vec(hash);
                 let p = BECH32_ALPHABET[&'p'];
                 Tag::to_vec_u5_convert(p, bytes)
             }
-            &&Tag::DescriptionTag { ref description } => {
+            &&Tag::Description { ref description } => {
                 let bytes = VecU5::from_u8_vec(&description.as_bytes().to_vec());
                 let d = BECH32_ALPHABET[&'d'];
                 Tag::to_vec_u5_convert(d, bytes)
             }
-            &&Tag::DescriptionHashTag { ref hash } => {
+            &&Tag::DescriptionHash { ref hash } => {
                 let bytes = VecU5::from_u8_vec(hash);
                 let h = BECH32_ALPHABET[&'h'];
                 Tag::to_vec_u5_convert(h, bytes)
             }
-            &&Tag::FallbackAddressTag { version, ref hash } => {
+            &&Tag::FallbackAddress { version, ref hash } => {
                 let bytes = VecU5::from_u8_vec(hash).map(|b| {
                     let mut data = vec![version];
                     data.extend(b);
@@ -119,7 +119,7 @@ impl Tag {
                 let f = BECH32_ALPHABET[&'f'];
                 Tag::to_vec_u5_convert(f, bytes)
             }
-            &&Tag::ExpiryTag { seconds } => {
+            &&Tag::Expiry { seconds } => {
                 let bytes = VecU5::from_u64(seconds);
                 let x = BECH32_ALPHABET[&'x'];
                 Tag::write_size(bytes.len()).map(|size| [vec![x], size, bytes].concat())
@@ -180,7 +180,7 @@ mod test {
 
     #[test]
     fn payment_hash_tag_test() {
-        let payment_hash_tag = Tag::PaymentHashTag {
+        let payment_hash_tag = Tag::PaymentHash {
             hash: vec![
                 0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6,
                 7, 8, 9, 1, 2,
@@ -196,7 +196,7 @@ mod test {
 
     #[test]
     fn description_tag_test() {
-        let description_tag = Tag::DescriptionTag {
+        let description_tag = Tag::Description {
             description: "Please consider supporting this project".to_owned(),
         };
         let u5_description_tag = vec![
@@ -209,7 +209,7 @@ mod test {
 
     #[test]
     fn description_hash_tag_test() {
-        let description_hash_tag = Tag::DescriptionHashTag {
+        let description_hash_tag = Tag::DescriptionHash {
             hash: vec![
                 57u8, 37, 182, 246, 126, 44, 52, 0, 54, 237, 18, 9, 61, 212, 78, 3, 104, 223, 27,
                 110, 162, 108, 83, 219, 228, 129, 31, 88, 253, 93, 184, 193,
@@ -230,7 +230,7 @@ mod test {
 
     #[test]
     fn fallback_address_tag_test() {
-        let fallback_address_tag = Tag::FallbackAddressTag {
+        let fallback_address_tag = Tag::FallbackAddress {
             version: 17,
             hash: vec![
                 49u8, 114, 181, 101, 79, 102, 131, 200, 251, 20, 105, 89, 211, 71, 206, 48, 60,
@@ -254,7 +254,7 @@ mod test {
 
     #[test]
     fn expiry_tag_test()  {
-        let expiry_tag = Tag::ExpiryTag {seconds: 60};
+        let expiry_tag = Tag::Expiry {seconds: 60};
         let u5_expiry_tag = &vec![6u8, 0, 2, 1, 28];
         assert!(expiry_tag.to_vec_u5().unwrap().eq(u5_expiry_tag))
     }
