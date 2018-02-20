@@ -1,6 +1,6 @@
 use std::num::ParseFloatError;
 use std::collections::HashMap;
-use types::{ConvertResult, Error, U5, VecU5, Unit};
+use types::{ConvertResult, Error, U5, Unit, VecU5};
 use bech32::Bech32;
 
 /// Bech32 alphabet
@@ -89,6 +89,11 @@ pub enum Tag {
     /// # Arguments
     /// `seconds` expiry data for this payment request
     Expiry { seconds: u64 },
+
+    /// Min final CLTV expiry
+    ///
+    /// `blocks` min final cltv expiry, in blocks
+    MinFinalCltvExpiry { blocks: u64 },
 }
 
 impl Tag {
@@ -123,6 +128,11 @@ impl Tag {
                 let bytes = VecU5::from_u64(seconds);
                 let x = BECH32_ALPHABET[&'x'];
                 Tag::write_size(bytes.len()).map(|size| [vec![x], size, bytes].concat())
+            }
+            &&Tag::MinFinalCltvExpiry { blocks } => {
+                let bytes = VecU5::from_u64(blocks);
+                let c = BECH32_ALPHABET[&'c'];
+                Tag::write_size(bytes.len()).map(|size| [vec![c], size, bytes].concat())
             }
         }
     }
@@ -253,10 +263,16 @@ mod test {
     }
 
     #[test]
-    fn expiry_tag_test()  {
-        let expiry_tag = Tag::Expiry {seconds: 60};
+    fn expiry_tag_test() {
+        let expiry_tag = Tag::Expiry { seconds: 60 };
         let u5_expiry_tag = &vec![6u8, 0, 2, 1, 28];
         assert!(expiry_tag.to_vec_u5().unwrap().eq(u5_expiry_tag))
+    }
+    #[test]
+    fn min_final_cltv_expiry_tag_test() {
+        let min_final = Tag::MinFinalCltvExpiry {blocks: 12 };
+        let u5_min_final_tag = &vec![24u8, 0, 1, 12];
+        assert!(min_final.to_vec_u5().unwrap().eq(u5_min_final_tag))
     }
 
     #[test]
