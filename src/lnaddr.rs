@@ -1,6 +1,6 @@
 use std::num::ParseFloatError;
 use std::collections::HashMap;
-use types::{ConvertResult, Error, U5, VecU5};
+use types::{ConvertResult, Error, U5, VecU5, Unit};
 use bech32::Bech32;
 
 /// Bech32 alphabet
@@ -13,30 +13,6 @@ lazy_static! {
 }
 
 /// BOLT #11:
-/// The following **multiplier** letters are defined:
-///
-/// 'm' (milli): multiply by 0.001
-/// 'u' (micro): multiply by 0.000001
-/// 'n' (nano): multiply by 0.000000001
-/// 'p' (pico): multiply by 0.000000000001
-///
-struct Unit;
-
-impl Unit {
-    //    let units = ["p", "n", "u", "m"];
-    fn value(c: char) -> f64 {
-        match c {
-            'p' => 1000_000_000_000f64,
-            'n' => 1000_000_000f64,
-            'u' => 1000_000f64,
-            'm' => 1000f64,
-            _ => 1f64,
-        }
-    }
-    fn units<'a>() -> &'a [&'a str] {
-        &["p", "n", "u", "m"]
-    }
-}
 
 /// Given an amount in bitcoin, shorten it
 ///

@@ -4,6 +4,34 @@ use num::bigint::BigUint;
 use std::{error, fmt};
 use utils::convert_bits;
 
+
+/// Bitcoin subunits
+/// The following **multiplier** letters are defined:
+///
+/// 'm' (milli): multiply by 0.001
+/// 'u' (micro): multiply by 0.000001
+/// 'n' (nano): multiply by 0.000000001
+/// 'p' (pico): multiply by 0.000000000001
+///
+pub struct Unit;
+
+impl Unit {
+    /// value corresponding to a given letter
+    pub fn value(c: char) -> f64 {
+        match c {
+            'p' => 1000_000_000_000f64,
+            'n' => 1000_000_000f64,
+            'u' => 1000_000f64,
+            'm' => 1000f64,
+            _ => 1f64,
+        }
+    }
+    /// multiplier letters
+    pub fn units<'a>() -> &'a [&'a str] {
+        &["p", "n", "u", "m"]
+    }
+}
+
 /// Alias for u8 that contains 5-bit values
 pub type U5 = u8;
 
