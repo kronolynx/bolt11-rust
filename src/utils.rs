@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 use std::num;
-use types::{ConvertResult, BitConversionError};
+use types::{ConvertResult, Error};
 
 /// convert vec u8 to hex-string
 pub fn to_hex(bytes: &[u8]) -> String {
@@ -51,7 +51,7 @@ pub fn convert_bits(data: &Vec<u8>, from: u32, to: u32, pad: bool) -> ConvertRes
         let v: u32 = *value as u32;
         if (v >> from) != 0 {
             // Input value exceeds `from` bit size
-            return Err(BitConversionError::InvalidInputValue(v as u8));
+            return Err(Error::InvalidInputValue(v as u8));
         }
         acc = (acc << from) | v;
         bits += from;
@@ -65,7 +65,7 @@ pub fn convert_bits(data: &Vec<u8>, from: u32, to: u32, pad: bool) -> ConvertRes
             ret.push(((acc << (to - bits)) & maxv) as u8);
         }
     } else if bits >= from || ((acc << (to - bits)) & maxv) != 0 {
-        return Err(BitConversionError::InvalidPadding);
+        return Err(Error::InvalidPadding);
     }
     Ok(ret)
 }

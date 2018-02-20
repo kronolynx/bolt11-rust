@@ -21,41 +21,57 @@ impl VecU5 {
         u5.to_str_radix(16)
     }
     /// Convert a vector containing u5 values to u8
-    pub fn to_u8(bytes: &Vec<U5>) -> ConvertResult {
+    pub fn to_u8_vec(bytes: &Vec<U5>) -> ConvertResult {
         convert_bits(bytes, 5, 8, true)
     }
     /// Convert a vector containing u8 values to u5
-    pub fn from_u8(bytes: &Vec<u8>) -> ConvertResult {
+    pub fn from_u8_vec(bytes: &Vec<u8>) -> ConvertResult {
         convert_bits(bytes, 8, 5, true)
+    }
+
+    /// Convert a long to a vector containing u5 values
+    pub fn from_u64(value: u64) -> Vec<U5> {
+        let mut acc = Vec::<U5>::new();
+        let mut val = value;
+        while val > 0 {
+            acc.push((val % 32) as U5);
+            val /= 32;
+        }
+        acc.reverse();
+        acc
     }
 }
 
 /// Result of vector base conversion
-pub type ConvertResult = Result<Vec<u8>, BitConversionError>;
+pub type ConvertResult = Result<Vec<u8>, Error>;
 
 /// Error types during bit conversion
 #[derive(PartialEq, Debug)]
-pub enum BitConversionError {
+pub enum Error {
     /// Input value exceeds "from bits" size
     InvalidInputValue(u8),
     /// Invalid padding values in data
     InvalidPadding,
+    /// Invalid input length
+    InvalidLength(String),
 }
 
-impl fmt::Display for BitConversionError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            BitConversionError::InvalidInputValue(b) => write!(f, "invalid input value ({})", b),
-            BitConversionError::InvalidPadding => write!(f, "invalid padding"),
+            Error::InvalidInputValue(b) => write!(f, "invalid input value ({})", b),
+            Error::InvalidPadding => write!(f, "invalid padding"),
+            Error::InvalidLength(ref e) => write!(f, "{}", e),
         }
     }
 }
 
-impl error::Error for BitConversionError {
+impl error::Error for Error {
     fn description(&self) -> &str {
         match *self {
-            BitConversionError::InvalidInputValue(_) => "invalid input value",
-            BitConversionError::InvalidPadding => "invalid padding",
+            Error::InvalidInputValue(_) => "invalid input value",
+            Error::InvalidPadding => "invalid padding",
+            Error::InvalidLength(ref e) => e,
         }
     }
 }
@@ -69,6 +85,6 @@ fn u5_test() {
         117, 30, 118, 232, 25, 145, 150, 212, 84, 148, 28, 69, 209, 179, 163, 35, 241, 67, 59, 214
     ];
 
-    assert!(VecU5::to_u8(&u5_vec).unwrap().eq(&u8_vec));
-    assert!(VecU5::from_u8(&u8_vec).unwrap().eq(&u5_vec));
+    assert!(VecU5::to_u8_vec(&u5_vec).unwrap().eq(&u8_vec));
+    assert!(VecU5::from_u8_vec(&u8_vec).unwrap().eq(&u5_vec));
 }
