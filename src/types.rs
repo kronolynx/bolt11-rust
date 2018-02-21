@@ -2,35 +2,9 @@
 
 use num::bigint::BigUint;
 use std::{error, fmt};
+use std::io;
 use utils::convert_bits;
-
-
-/// Bitcoin subunits
-/// The following **multiplier** letters are defined:
-///
-/// 'm' (milli): multiply by 0.001
-/// 'u' (micro): multiply by 0.000001
-/// 'n' (nano): multiply by 0.000000001
-/// 'p' (pico): multiply by 0.000000000001
-///
-pub struct Unit;
-
-impl Unit {
-    /// value corresponding to a given letter
-    pub fn value(c: char) -> f64 {
-        match c {
-            'p' => 1000_000_000_000f64,
-            'n' => 1000_000_000f64,
-            'u' => 1000_000f64,
-            'm' => 1000f64,
-            _ => 1f64,
-        }
-    }
-    /// multiplier letters
-    pub fn units<'a>() -> &'a [&'a str] {
-        &["p", "n", "u", "m"]
-    }
-}
+use std::num;
 
 /// Alias for u8 that contains 5-bit values
 pub type U5 = u8;
@@ -73,8 +47,8 @@ impl VecU5 {
 /// Result of vector base conversion
 pub type ConvertResult = Result<Vec<u8>, Error>;
 
-/// Error types during bit conversion
-#[derive(PartialEq, Debug)]
+/// Error types
+#[derive(Debug)]
 pub enum Error {
     /// Input value exceeds "from bits" size
     InvalidInputValue(u8),
@@ -82,6 +56,10 @@ pub enum Error {
     InvalidPadding,
     /// Invalid input length
     InvalidLength(String),
+    /// Wraps an io error produced when reading or writing
+    IOErr(io::Error),
+    /// Wraps parse float error
+    ParseFloatErr(num::ParseFloatError)
 }
 
 impl fmt::Display for Error {
@@ -90,6 +68,8 @@ impl fmt::Display for Error {
             Error::InvalidInputValue(b) => write!(f, "invalid input value ({})", b),
             Error::InvalidPadding => write!(f, "invalid padding"),
             Error::InvalidLength(ref e) => write!(f, "{}", e),
+            Error::IOErr(ref e) => write!(f, "{}", e),
+            Error::ParseFloatErr(ref e) => write!(f, "{}", e),
         }
     }
 }
@@ -100,9 +80,25 @@ impl error::Error for Error {
             Error::InvalidInputValue(_) => "invalid input value",
             Error::InvalidPadding => "invalid padding",
             Error::InvalidLength(ref e) => e,
+            Error::IOErr(ref e) => error::Error::description(e),
+            Error::ParseFloatErr(ref e) => error::Error::description(e),
+        }
+    }
+    fn cause(&self) -> Option<&error::Error> {
+        match *self {
+            Error::IOErr(ref e) => Some(e),
+            Error::ParseFloatErr(ref e) => Some(e),
+            _ => None,
         }
     }
 }
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Error {
+        Error::IOErr(e)
+    }
+}
+
 #[test]
 fn u5_test() {
     let u5_vec = vec![
