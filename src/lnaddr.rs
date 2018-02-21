@@ -1,7 +1,9 @@
-use std::num::ParseFloatError;
 use std::collections::HashMap;
-use types::{ConvertResult, Error, U5, Unit, VecU5};
+use types::{Error, U5, VecU5};
 use bech32::Bech32;
+use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
+use itertools::Itertools;
+use utils::from_hex;
 
 /// Bech32 alphabet
 lazy_static! {
@@ -10,6 +12,33 @@ lazy_static! {
         'f' => 9,'2' => 10,'t' => 11,'v' => 12,'d' => 13,'w' => 14,'0' => 15,'s' => 16,'3' => 17,
         'j' => 18,'n' => 19,'5' => 20,'4' => 21,'k' => 22,'h' => 23, 'c' => 24, 'e' => 25,'6' => 26,
         'm' => 27,'u' => 28,'a' => 29,'7' => 30,'l' => 31];
+}
+
+/// Bitcoin subunits
+/// The following **multiplier** letters are defined:
+///
+/// 'm' (milli): multiply by 0.001
+/// 'u' (micro): multiply by 0.000001
+/// 'n' (nano): multiply by 0.000000001
+/// 'p' (pico): multiply by 0.000000000001
+///
+pub struct Unit;
+
+impl Unit {
+    /// value corresponding to a given letter
+    pub fn value(c: char) -> f64 {
+        match c {
+            'p' => 1000_000_000_000f64,
+            'n' => 1000_000_000f64,
+            'u' => 1000_000f64,
+            'm' => 1000f64,
+            _ => 1f64,
+        }
+    }
+    /// multiplier letters
+    pub fn units<'a>() -> &'a [&'a str] {
+        &["p", "n", "u", "m"]
+    }
 }
 
 /// BOLT #11:
@@ -42,13 +71,13 @@ fn encode_amount_aux(amount: u64, units: &[&str]) -> String {
 /// anything except a `multiplier` in the table above.
 /// # Arguments
 /// * `amount` - A string that holds the amount to shorten
-pub fn decode_amount(amount: &str) -> Result<f64, ParseFloatError> {
+pub fn decode_amount(amount: &str) -> Result<f64, Error> {
     let unit_char = amount.chars().last().map(|c| Unit::value(c));
 
     match unit_char {
         Some(u) if u != 1f64 => amount[..amount.len() - 1].parse::<f64>().map(|v| v / u),
         _ => amount.parse::<f64>(),
-    }
+    }.map_err(|e| Error::ParseFloatErr(e))
 }
 
 /// Tag
@@ -94,6 +123,15 @@ pub enum Tag {
     ///
     /// `blocks` min final cltv expiry, in blocks
     MinFinalCltvExpiry { blocks: u64 },
+
+    /// Routing Info Tag
+    ///
+    /// # Arguments
+    ///  `path` one or more entries containing extra routing information for a private route
+    RoutingInfo { path: Vec<ExtraHop> },
+
+    /// unknown tag
+    UnknownTag { tag: U5, bytes: Vec<U5> },
 }
 
 impl Tag {
@@ -134,6 +172,20 @@ impl Tag {
                 let c = BECH32_ALPHABET[&'c'];
                 Tag::write_size(bytes.len()).map(|size| [vec![c], size, bytes].concat())
             }
+            &&Tag::RoutingInfo { ref path } => {
+                let bytes = path.iter()
+                    .map(|hop| hop.pack())
+                    .fold_results(Vec::<u8>::new(), |mut acc, hop| {
+                        acc.extend(hop);
+                        acc
+                    })
+                    .and_then(|v| VecU5::from_u8_vec(&v));
+
+                let r = BECH32_ALPHABET[&'r'];
+                Tag::to_vec_u5_convert(r, bytes)
+            }
+            &&Tag::UnknownTag { tag, ref bytes } => Tag::write_size(bytes.len())
+                .map(|size| [vec![tag], size, bytes.to_owned()].concat()),
         }
     }
     // helper for to_vec_u5
@@ -181,6 +233,57 @@ impl Timestamp {
         }
         acc.reverse();
         acc
+    }
+}
+
+/// entries containing extra routing information for a private route
+pub struct ExtraHop {
+    /// public key (264 bits)
+    pub_key: Vec<u8>,
+    short_channel_id: u64,
+    /// big endian
+    fee_base_msat: u32,
+    /// big endian
+    fee_proportional_millionths: u32,
+    /// big endian
+    cltv_expiry_delta: u16,
+}
+
+impl ExtraHop {
+    /// 33 + 8 + 4 + 4 + 2
+    pub const CHUNK_LENGTH: usize = 51;
+
+    /// pack into Vec<u8>
+    pub fn pack(&self) -> Result<Vec<u8>, Error> {
+        let mut wtr: Vec<u8> = vec![];
+        wtr.write_u64::<BigEndian>(self.short_channel_id)?;
+        wtr.write_u32::<BigEndian>(self.fee_base_msat)?;
+        wtr.write_u32::<BigEndian>(self.fee_proportional_millionths)?;
+        wtr.write_u16::<BigEndian>(self.cltv_expiry_delta)?;
+        Ok([self.pub_key.to_owned(), wtr].concat())
+    }
+
+    /// parse u8 slice into ExtraHop
+    pub fn parse(data: &[u8]) -> ExtraHop {
+        let pub_key = data[0..33].to_owned();
+        let short_channel_id = BigEndian::read_u64(&data[33..41]);
+        let fee_base_msat = BigEndian::read_u32(&data[41..45]);
+        let fee_proportional_millionths = BigEndian::read_u32(&data[45..49]);
+        let cltv_expiry_delta = BigEndian::read_u16(&data[49..ExtraHop::CHUNK_LENGTH]);
+        ExtraHop {
+            pub_key,
+            short_channel_id,
+            fee_base_msat,
+            fee_proportional_millionths,
+            cltv_expiry_delta,
+        }
+    }
+
+    /// parse a vec<u8> into a vec<ExtraHop>
+    pub fn parse_all(data: Vec<u8>) -> Vec<ExtraHop> {
+        data.chunks(ExtraHop::CHUNK_LENGTH)
+            .map(ExtraHop::parse)
+            .collect_vec()
     }
 }
 
@@ -252,8 +355,6 @@ mod test {
             9, 1, 1, 17, 6, 5, 25, 11, 10, 25, 10, 15, 12, 26, 1, 28, 17, 30, 24, 20, 13, 5, 12,
             29, 6, 17, 30, 14, 6, 0, 30, 10, 28, 19, 5, 7,
         ];
-        println!("f {:?}", fallback_address_tag.to_vec_u5().unwrap());
-        println!("r {:?}", u5_fallback_address_tag);
         assert!(
             fallback_address_tag
                 .to_vec_u5()
@@ -268,11 +369,49 @@ mod test {
         let u5_expiry_tag = &vec![6u8, 0, 2, 1, 28];
         assert!(expiry_tag.to_vec_u5().unwrap().eq(u5_expiry_tag))
     }
+
     #[test]
     fn min_final_cltv_expiry_tag_test() {
-        let min_final = Tag::MinFinalCltvExpiry {blocks: 12 };
+        let min_final = Tag::MinFinalCltvExpiry { blocks: 12 };
         let u5_min_final_tag = &vec![24u8, 0, 1, 12];
         assert!(min_final.to_vec_u5().unwrap().eq(u5_min_final_tag))
+    }
+
+    #[test]
+    fn routing_info_tag_test() {
+        let routing_info = Tag::RoutingInfo {
+            path: vec![
+                ExtraHop {
+                    pub_key: from_hex(
+                        "029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255",
+                    ).unwrap(),
+                    short_channel_id: 72623859790382856,
+                    fee_base_msat: 1,
+                    fee_proportional_millionths: 20,
+                    cltv_expiry_delta: 3,
+                },
+                ExtraHop {
+                    pub_key: from_hex(
+                        "039e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255",
+                    ).unwrap(),
+                    short_channel_id: 217304205466536202,
+                    fee_base_msat: 2,
+                    fee_proportional_millionths: 30,
+                    cltv_expiry_delta: 4,
+                },
+            ],
+        };
+
+        let u5_routing_info_tag = vec![
+            3u8, 5, 4, 0, 10, 15, 0, 7, 10, 8, 1, 23, 1, 10, 19, 9, 31, 24, 30, 18, 11, 2, 3, 24,
+            29, 2, 3, 3, 29, 30, 14, 14, 8, 2, 6, 0, 24, 7, 28, 30, 30, 20, 21, 24, 13, 31, 1, 9,
+            3, 27, 24, 24, 29, 25, 5, 10, 0, 8, 2, 0, 12, 2, 0, 10, 1, 16, 7, 1, 0, 0, 0, 0, 0, 0,
+            1, 0, 0, 0, 0, 0, 5, 0, 0, 0, 12, 1, 25, 28, 0, 29, 9, 0, 6, 28, 5, 10, 13, 7, 31, 3,
+            26, 9, 12, 8, 15, 3, 20, 8, 12, 15, 23, 25, 25, 25, 0, 8, 24, 3, 0, 31, 19, 27, 26, 18,
+            23, 1, 23, 28, 5, 4, 15, 15, 3, 3, 23, 4, 21, 8, 3, 0, 16, 2, 16, 12, 1, 24, 8, 1, 4,
+            5, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 30, 0, 0, 2, 0,
+        ];
+        assert!(routing_info.to_vec_u5().unwrap().eq(&u5_routing_info_tag))
     }
 
     #[test]
