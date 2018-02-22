@@ -23,3 +23,4 @@ mod macros;
 pub mod lnaddr;
 pub mod utils;
 pub mod types;
+pub mod tag;
