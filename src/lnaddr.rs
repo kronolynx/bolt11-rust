@@ -77,9 +77,10 @@ pub fn decode_amount(amount: &str) -> Result<f64, Error> {
     match unit_char {
         Some(u) if u != 1f64 => amount[..amount.len() - 1].parse::<f64>().map(|v| v / u),
         _ => amount.parse::<f64>(),
-    }.map_err(|e| Error::ParseFloatErr(e))
+    }.map_err(Error::ParseFloatErr)
 }
 
+#[derive(Debug, Eq, PartialEq)]
 /// Tag
 pub enum Tag {
     /// Payment Hash Tag
@@ -214,6 +215,60 @@ impl Tag {
     }
 }
 
+impl Tag {
+    pub fn parse(input: &Vec<U5>) -> Result<Tag, Error> {
+        let tag = input[0];
+        let len = (input[1] * 32 + input[2]) as usize;
+        match tag {
+            p if p == BECH32_ALPHABET[&'p'] => {
+                let hash_result = VecU5::to_u8_vec(&input[3..55].to_vec());
+                hash_result.map(|hash| Tag::PaymentHash { hash })
+            }
+            d if d == BECH32_ALPHABET[&'d'] => {
+                let description_result = VecU5::to_u8_vec(&input[3..len + 3].to_vec());
+                description_result
+                    .and_then(|v| String::from_utf8(v).map_err(Error::FromUTF8Err))
+                    .map(|description| Tag::Description { description })
+            }
+            h if h == BECH32_ALPHABET[&'h'] => {
+                let hash_result = VecU5::to_u8_vec(&input[3..len + 3].to_vec());
+                hash_result.map(|hash| Tag::DescriptionHash { hash })
+            }
+            f if f == BECH32_ALPHABET[&'f'] => {
+                let version = input[3];
+                let hash_result = VecU5::to_u8_vec(&input[4..len + 3].to_vec());
+                match version {
+                    v if v <= 18u8 => {
+                        hash_result.map(|hash| Tag::FallbackAddress { version, hash })
+                    }
+                    _ => Ok(Tag::UnknownTag {
+                        tag,
+                        bytes: input[3..len + 3].to_vec(),
+                    }),
+                }
+            }
+            r if r == BECH32_ALPHABET[&'r'] => {
+                let data_result = VecU5::to_u8_vec(&input[3..len + 3].to_vec());
+                data_result
+                    .map(ExtraHop::parse_all)
+                    .map(|path| Tag::RoutingInfo { path })
+            }
+            x if x == BECH32_ALPHABET[&'x'] => {
+                let seconds = VecU5::to_u64(len, &input[3..len + 3].to_vec());
+                Ok(Tag::Expiry { seconds })
+            }
+            c if c == BECH32_ALPHABET[&'c'] => {
+                let blocks = VecU5::to_u64(len, &input[3..len + 3].to_vec());
+                Ok(Tag::MinFinalCltvExpiry { blocks })
+            }
+            _ => Ok(Tag::UnknownTag {
+                tag,
+                bytes: input[3..len + 3].to_vec(),
+            }),
+        }
+    }
+}
+
 /// seconds-since-1970 (35 bits, big-endian)
 struct Timestamp;
 
@@ -236,6 +291,7 @@ impl Timestamp {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
 /// entries containing extra routing information for a private route
 pub struct ExtraHop {
     /// public key (264 bits)
@@ -281,7 +337,10 @@ impl ExtraHop {
 
     /// parse a vec<u8> into a vec<ExtraHop>
     pub fn parse_all(data: Vec<u8>) -> Vec<ExtraHop> {
-        data.chunks(ExtraHop::CHUNK_LENGTH)
+        data
+            .chunks(ExtraHop::CHUNK_LENGTH)
+            // the last chunk may be shorter if there's not enough elements
+            .filter(|c| c.len() == ExtraHop::CHUNK_LENGTH)
             .map(ExtraHop::parse)
             .collect_vec()
     }
@@ -412,6 +471,110 @@ mod test {
             5, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 30, 0, 0, 2, 0,
         ];
         assert!(routing_info.to_vec_u5().unwrap().eq(&u5_routing_info_tag))
+    }
+
+    #[test]
+    fn tag_parse_test() {
+        // PaymentHashTag(0001020304050607080900010203040506070809000102030405060708090102),
+        let u5_payment_hash_tag = vec![
+            1u8, 1, 20, 0, 0, 0, 16, 4, 0, 24, 4, 0, 20, 3, 0, 14, 2, 0, 9, 0, 0, 0, 16, 4, 0, 24,
+            4, 0, 20, 3, 0, 14, 2, 0, 9, 0, 0, 0, 16, 4, 0, 24, 4, 0, 20, 3, 0, 14, 2, 0, 9, 0, 4,
+            1, 0,
+        ];
+        // ExpiryTag(60))
+        let u5_expiry_tag = vec![6u8, 0, 2, 1, 28];
+        // DescriptionTag(Please consider supporting this project))
+        let u5_description_tag = vec![
+            13u8, 1, 31, 10, 1, 22, 6, 10, 24, 11, 19, 12, 20, 16, 6, 6, 27, 27, 14, 14, 13, 20,
+            22, 8, 25, 11, 18, 4, 1, 25, 23, 10, 28, 3, 16, 13, 29, 25, 7, 8, 26, 11, 14, 12, 28,
+            16, 7, 8, 26, 3, 9, 14, 12, 16, 7, 0, 28, 19, 15, 13, 9, 18, 22, 6, 29, 0,
+        ];
+        // DescriptionHashTag(3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1))
+        let u5_description_hash_tag = vec![
+            23u8, 1, 20, 7, 4, 18, 27, 13, 29, 19, 30, 5, 16, 26, 0, 0, 13, 23, 13, 2, 8, 4, 19,
+            27, 21, 2, 14, 0, 13, 20, 13, 30, 6, 27, 14, 20, 9, 22, 5, 7, 22, 31, 4, 16, 4, 15, 21,
+            17, 31, 10, 29, 23, 3, 0, 16,
+        ];
+        // FallbackAddressTag(17,3172b5654f6683c8fb146959d347ce303cae4ca7)
+        let u5_fallback_address_tag = vec![
+            9u8, 1, 1, 17, 6, 5, 25, 11, 10, 25, 10, 15, 12, 26, 1, 28, 17, 30, 24, 20, 13, 5, 12,
+            29, 6, 17, 30, 14, 6, 0, 30, 10, 28, 19, 5, 7,
+        ];
+        // RoutingInfoTag(List(ExtraHop(029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255,72623859790382856,1,20,3),ExtraHop(039e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255,217304205466536202,2,30,4)
+        let u5_routing_info_tag = vec![
+            3u8, 5, 4, 0, 10, 15, 0, 7, 10, 8, 1, 23, 1, 10, 19, 9, 31, 24, 30, 18, 11, 2, 3, 24,
+            29, 2, 3, 3, 29, 30, 14, 14, 8, 2, 6, 0, 24, 7, 28, 30, 30, 20, 21, 24, 13, 31, 1, 9,
+            3, 27, 24, 24, 29, 25, 5, 10, 0, 8, 2, 0, 12, 2, 0, 10, 1, 16, 7, 1, 0, 0, 0, 0, 0, 0,
+            1, 0, 0, 0, 0, 0, 5, 0, 0, 0, 12, 1, 25, 28, 0, 29, 9, 0, 6, 28, 5, 10, 13, 7, 31, 3,
+            26, 9, 12, 8, 15, 3, 20, 8, 12, 15, 23, 25, 25, 25, 0, 8, 24, 3, 0, 31, 19, 27, 26, 18,
+            23, 1, 23, 28, 5, 4, 15, 15, 3, 3, 23, 4, 21, 8, 3, 0, 16, 2, 16, 12, 1, 24, 8, 1, 4,
+            5, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 30, 0, 0, 2, 0,
+        ];
+        // MinFinalCltvExpiryTag(12)
+        let u5_min_final_cltv_expiry_tag = vec![24u8, 0, 1, 12];
+
+        assert_eq!(
+            Tag::parse(&u5_payment_hash_tag).unwrap(),
+            Tag::PaymentHash {
+                hash: ::utils::from_hex(
+                    "0001020304050607080900010203040506070809000102030405060708090102"
+                ).unwrap(),
+            }
+        );
+        assert_eq!(
+            Tag::parse(&u5_expiry_tag).unwrap(),
+            Tag::Expiry { seconds: 60 }
+        );
+        assert_eq!(
+            Tag::parse(&u5_description_tag).unwrap(),
+            Tag::Description {
+                description: "Please consider supporting this project".to_owned(),
+            }
+        );
+        assert_eq!(
+            Tag::parse(&u5_description_hash_tag).unwrap(),
+            Tag::DescriptionHash {
+                hash: ::utils::from_hex(
+                    "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1"
+                ).unwrap(),
+            }
+        );
+        assert_eq!(
+            Tag::parse(&u5_fallback_address_tag).unwrap(),
+            Tag::FallbackAddress {
+                version: 17,
+                hash: ::utils::from_hex("3172b5654f6683c8fb146959d347ce303cae4ca7").unwrap(),
+            }
+        );
+        assert_eq!(
+            Tag::parse(&u5_routing_info_tag).unwrap(),
+            Tag::RoutingInfo {
+                path: vec![
+                    ExtraHop {
+                        pub_key: ::utils::from_hex(
+                            "029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255",
+                        ).unwrap(),
+                        short_channel_id: 72623859790382856,
+                        fee_base_msat: 1,
+                        fee_proportional_millionths: 20,
+                        cltv_expiry_delta: 3,
+                    },
+                    ExtraHop {
+                        pub_key: ::utils::from_hex(
+                            "039e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255",
+                        ).unwrap(),
+                        short_channel_id: 217304205466536202,
+                        fee_base_msat: 2,
+                        fee_proportional_millionths: 30,
+                        cltv_expiry_delta: 4,
+                    },
+                ],
+            }
+        );
+        assert_eq!(
+            Tag::parse(&u5_min_final_cltv_expiry_tag).unwrap(),
+            Tag::MinFinalCltvExpiry { blocks: 12 }
+        )
     }
 
     #[test]
