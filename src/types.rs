@@ -5,6 +5,7 @@ use std::{error, fmt};
 use std::io;
 use utils::convert_bits;
 use std::num;
+use std::string;
 
 /// Alias for u8 that contains 5-bit values
 pub type U5 = u8;
@@ -24,7 +25,7 @@ impl VecU5 {
     }
     /// Convert a vector containing u5 values to u8
     pub fn to_u8_vec(bytes: &Vec<U5>) -> ConvertResult {
-        convert_bits(bytes, 5, 8, true)
+        convert_bits(bytes, 5, 8, false)
     }
     /// Convert a vector containing u8 values to u5
     pub fn from_u8_vec(bytes: &Vec<u8>) -> ConvertResult {
@@ -41,6 +42,12 @@ impl VecU5 {
         }
         acc.reverse();
         acc
+    }
+    /// Convert a vector of u5 values to u64
+    pub fn to_u64(length: usize, data: &Vec<U5>) -> u64 {
+        data.iter()
+            .take(length)
+            .fold(0u64, |acc, i| acc * 32u64 + *i as u64)
     }
 }
 
@@ -59,7 +66,9 @@ pub enum Error {
     /// Wraps an io error produced when reading or writing
     IOErr(io::Error),
     /// Wraps parse float error
-    ParseFloatErr(num::ParseFloatError)
+    ParseFloatErr(num::ParseFloatError),
+    /// Wraps string from utf8 error
+    FromUTF8Err(string::FromUtf8Error),
 }
 
 impl fmt::Display for Error {
@@ -70,6 +79,7 @@ impl fmt::Display for Error {
             Error::InvalidLength(ref e) => write!(f, "{}", e),
             Error::IOErr(ref e) => write!(f, "{}", e),
             Error::ParseFloatErr(ref e) => write!(f, "{}", e),
+            Error::FromUTF8Err(ref e) => write!(f, "{}", e),
         }
     }
 }
@@ -82,12 +92,14 @@ impl error::Error for Error {
             Error::InvalidLength(ref e) => e,
             Error::IOErr(ref e) => error::Error::description(e),
             Error::ParseFloatErr(ref e) => error::Error::description(e),
+            Error::FromUTF8Err(ref e) => error::Error::description(e),
         }
     }
     fn cause(&self) -> Option<&error::Error> {
         match *self {
             Error::IOErr(ref e) => Some(e),
             Error::ParseFloatErr(ref e) => Some(e),
+            Error::FromUTF8Err(ref e) => Some(e),
             _ => None,
         }
     }
@@ -96,6 +108,18 @@ impl error::Error for Error {
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Error {
         Error::IOErr(e)
+    }
+}
+
+impl From<num::ParseFloatError> for Error {
+    fn from(e: num::ParseFloatError) -> Error {
+        Error::ParseFloatErr(e)
+    }
+}
+
+impl From<string::FromUtf8Error> for Error {
+    fn from(e: string::FromUtf8Error) -> Error {
+        Error::FromUTF8Err(e)
     }
 }
 
