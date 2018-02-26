@@ -3,6 +3,7 @@
 use std::fmt::Write;
 use std::num;
 use types::{ConvertResult, Error};
+use std::ops::Range;
 
 /// convert vec u8 to hex-string
 pub fn to_hex(bytes: &[u8]) -> String {
@@ -14,7 +15,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
 
 /// Decode a hex string into bytes.
 pub fn from_hex(hex_str: &str) -> Result<Vec<u8>, num::ParseIntError> {
-    let padded: String  = if hex_str.len() % 2 != 0 {
+    let padded: String = if hex_str.len() % 2 != 0 {
         let mut s = String::from("0");
         s.push_str(hex_str);
         s
@@ -32,7 +33,6 @@ fn split_n(s: &str, n: usize) -> Vec<&str> {
         .map(|i| &s[2 * i..2 * i + n])
         .collect()
 }
-
 
 /// Convert between bit sizes
 ///
@@ -70,6 +70,17 @@ pub fn convert_bits(data: &Vec<u8>, from: u32, to: u32, pad: bool) -> ConvertRes
     Ok(ret)
 }
 
+/// Get safely a slice from a vector corresponding to `range` or an option
+/// # Arguments
+/// `vec` vector
+/// `range` range
+pub fn get_slice<T>(vec: &Vec<T>, range: Range<usize>) -> Option<&[T]> {
+    if range.start > range.end || range.end > vec.len() {
+        None
+    } else {
+        Some(&vec[range])
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -85,13 +96,7 @@ mod test {
     #[test]
     fn test_from_hex() {
         assert_eq!(from_hex("00000000").unwrap(), vec![0, 0, 0, 0]);
-        assert_eq!(
-            from_hex("0a0b0c0d").unwrap(),
-            vec![10, 11, 12, 13]
-        );
-        assert_eq!(
-            from_hex("000000ff").unwrap(),
-            vec![0, 0, 0, 255]
-        );
+        assert_eq!(from_hex("0a0b0c0d").unwrap(), vec![10, 11, 12, 13]);
+        assert_eq!(from_hex("000000ff").unwrap(), vec![0, 0, 0, 255]);
     }
 }
