@@ -4,8 +4,7 @@ use types::{Error, U5, VecU5};
 use std::collections::HashMap;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use itertools::Itertools;
-
-
+use utils;
 
 /// Bech32 alphabet
 lazy_static! {
@@ -20,55 +19,61 @@ lazy_static! {
 /// Tag
 pub enum Tag {
     /// Payment Hash Tag
-    ///
-    /// # Arguments
-    /// * `hash` payment hash
-    PaymentHash { hash: Vec<u8> },
+    PaymentHash {
+        /// `hash` payment hash
+        hash: Vec<u8>,
+    },
 
     /// Description Tag
-    ///
-    /// # Arguments
-    /// * `description` a free-format string that will be included in the payment request
-    Description { description: String },
+    Description {
+        ///  `description` a free-format string that will be included in the payment request
+        description: String,
+    },
 
     /// Hash Tag
-    ///
-    /// # Arguments
-    /// `hash` hash that will be included in the payment request, and can be checked against
-    ///  the hash of a long description, an invoice, ...
-    DescriptionHash { hash: Vec<u8> },
+    DescriptionHash {
+        /// `hash` hash that will be included in the payment request, and can be checked against
+        ///  the hash of a long description, an invoice, ...
+        hash: Vec<u8>,
+    },
 
     /// Fallback Payment Tag that specifies a fallback payment address to be used if LN payment
     /// cannot be processed
-    ///
-    /// # Arguments
-    /// `version` address version; valid values are
-    ///               - 17 (pubkey hash)
-    ///               - 18 (script hash)
-    ///               - 0 (segwit hash: p2wpkh (20 bytes) or p2wsh (32 bytes))
-    /// `hash`    address hash
-    ///
-    FallbackAddress { version: u8, hash: Vec<u8> },
+    FallbackAddress {
+        /// `version` address version; valid values are
+        ///               - 17 (pubkey hash)
+        ///               - 18 (script hash)
+        ///               - 0 (segwit hash: p2wpkh (20 bytes) or p2wsh (32 bytes))
+        version: u8,
+        /// `hash`    address hash
+        hash: Vec<u8>,
+    },
 
     /// Expiry Date
-    ///
-    /// # Arguments
-    /// `seconds` expiry data for this payment request
-    Expiry { seconds: u64 },
+    Expiry {
+        /// `seconds` expiry data for this payment request
+        seconds: u64,
+    },
 
     /// Min final CLTV expiry
-    ///
-    /// `blocks` min final cltv expiry, in blocks
-    MinFinalCltvExpiry { blocks: u64 },
+    MinFinalCltvExpiry {
+        /// `blocks` min final cltv expiry, in blocks
+        blocks: u64,
+    },
 
     /// Routing Info Tag
-    ///
-    /// # Arguments
-    ///  `path` one or more entries containing extra routing information for a private route
-    RoutingInfo { path: Vec<ExtraHop> },
+    RoutingInfo {
+        ///  `path` one or more entries containing extra routing information for a private route
+        path: Vec<ExtraHop>,
+    },
 
     /// unknown tag
-    UnknownTag { tag: U5, bytes: Vec<U5> },
+    UnknownTag {
+        /// `tag` unknown tag
+        tag: U5,
+        /// `bytes` content bytes
+        bytes: Vec<U5>,
+    },
 }
 
 impl Tag {
@@ -78,17 +83,17 @@ impl Tag {
             &&Tag::PaymentHash { ref hash } => {
                 let bytes = VecU5::from_u8_vec(hash);
                 let p = BECH32_ALPHABET[&'p'];
-                Tag::to_vec_u5_convert(p, bytes)
+                Tag::vec_u5_aux(p, bytes)
             }
             &&Tag::Description { ref description } => {
                 let bytes = VecU5::from_u8_vec(&description.as_bytes().to_vec());
                 let d = BECH32_ALPHABET[&'d'];
-                Tag::to_vec_u5_convert(d, bytes)
+                Tag::vec_u5_aux(d, bytes)
             }
             &&Tag::DescriptionHash { ref hash } => {
                 let bytes = VecU5::from_u8_vec(hash);
                 let h = BECH32_ALPHABET[&'h'];
-                Tag::to_vec_u5_convert(h, bytes)
+                Tag::vec_u5_aux(h, bytes)
             }
             &&Tag::FallbackAddress { version, ref hash } => {
                 let bytes = VecU5::from_u8_vec(hash).map(|b| {
@@ -97,7 +102,7 @@ impl Tag {
                     data
                 });
                 let f = BECH32_ALPHABET[&'f'];
-                Tag::to_vec_u5_convert(f, bytes)
+                Tag::vec_u5_aux(f, bytes)
             }
             &&Tag::Expiry { seconds } => {
                 let bytes = VecU5::from_u64(seconds);
@@ -119,14 +124,14 @@ impl Tag {
                     .and_then(|v| VecU5::from_u8_vec(&v));
 
                 let r = BECH32_ALPHABET[&'r'];
-                Tag::to_vec_u5_convert(r, bytes)
+                Tag::vec_u5_aux(r, bytes)
             }
             &&Tag::UnknownTag { tag, ref bytes } => Tag::write_size(bytes.len())
                 .map(|size| [vec![tag], size, bytes.to_owned()].concat()),
         }
     }
     // helper for to_vec_u5
-    fn to_vec_u5_convert(value: u8, data: Result<Vec<u8>, Error>) -> Result<Vec<U5>, Error> {
+    fn vec_u5_aux(value: u8, data: Result<Vec<u8>, Error>) -> Result<Vec<U5>, Error> {
         match data {
             Ok(bytes) => {
                 let len = bytes.len();
@@ -152,9 +157,18 @@ impl Tag {
 }
 
 impl Tag {
+    /// parse Tag from u5 vector
     pub fn parse(input: &Vec<U5>) -> Result<Tag, Error> {
-        let tag = input[0];
-        let len = (input[1] * 32 + input[2]) as usize;
+        let tag = *input
+            .get(0)
+            .ok_or(Error::InvalidLength("invalid vector length".to_owned()))?;
+        // declared data length
+        let len = utils::get_slice(input, 1..3)
+            .map(|v| (v[0] * 32 + v[1]) as usize)
+            // check if the vector has the declared lenght
+            .and_then(|len| if len <= input.len() + 3 {Some(len)} else {None})
+            .ok_or(Error::InvalidLength("invalid declared length".to_owned()))?;
+
         match tag {
             p if p == BECH32_ALPHABET[&'p'] => {
                 let hash_result = VecU5::to_u8_vec(&input[3..55].to_vec());
@@ -265,7 +279,6 @@ mod test {
     use super::*;
     use utils::from_hex;
 
-
     #[test]
     fn payment_hash_tag() {
         let u5_payment_hash_tag = vec![
@@ -310,9 +323,8 @@ mod test {
         assert_eq!(
             Tag::parse(&u5_description_hash_tag).unwrap(),
             Tag::DescriptionHash {
-                hash: from_hex(
-                    "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1"
-                ).unwrap(),
+                hash: from_hex("3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1")
+                    .unwrap(),
             }
         );
     }
