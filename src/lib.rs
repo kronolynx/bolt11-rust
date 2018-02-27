@@ -17,12 +17,12 @@ extern crate itertools;
 #[macro_use]
 extern crate lazy_static;
 extern crate num;
+
 #[macro_use]
 mod macros;
-
-mod lnaddr;
+mod timestamp;
 mod utils;
 mod types;
 mod tag;
 mod amount;
-
+mod signature;
