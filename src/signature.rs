@@ -2,7 +2,7 @@ use num::bigint::{BigInt, Sign};
 use types::Error;
 
 /// Bitcoin-style signature of above (520 bits)
-struct Signature {
+pub struct Signature {
     /// r (32 bytes)
     r: BigInt,
     /// s (32 bytes)

@@ -1,15 +1,15 @@
 use types::U5;
 
 /// seconds-since-1970 (35 bits, big-endian)
-struct Timestamp;
+pub struct Timestamp;
 
 impl Timestamp {
     /// decode timestamp from u5 vector
-    fn decode(data: &Vec<U5>) -> u64 {
+    pub fn decode(data: &Vec<U5>) -> u64 {
         data.iter().take(7).fold(0, |a, b| a * 32u64 + *b as u64)
     }
     /// encode timestamp
-    fn encode(timestamp: u64) -> Vec<U5> {
+    pub fn encode(timestamp: u64) -> Vec<U5> {
         let mut acc: Vec<U5> = Vec::new();
         let mut time_acc = timestamp;
         // 35 bits, big-endian
