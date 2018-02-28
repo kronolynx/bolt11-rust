@@ -242,14 +242,14 @@ impl Tag {
 /// entries containing extra routing information for a private route
 pub struct ExtraHop {
     /// public key (264 bits)
-    pub_key: Vec<u8>,
-    short_channel_id: u64,
-    /// big endian
-    fee_base_msat: u32,
-    /// big endian
-    fee_proportional_millionths: u32,
-    /// big endian
-    cltv_expiry_delta: u16,
+    pub pub_key: Vec<u8>,
+    pub short_channel_id: u64,
+     /// big endian
+    pub fee_base_msat: u32,
+     /// big endian
+    pub fee_proportional_millionths: u32,
+     /// big endian
+    pub cltv_expiry_delta: u16,
 }
 
 impl ExtraHop {

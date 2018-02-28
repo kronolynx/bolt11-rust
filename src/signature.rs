@@ -4,11 +4,11 @@ use types::Error;
 /// Bitcoin-style signature of above (520 bits)
 pub struct Signature {
     /// r (32 bytes)
-    r: BigInt,
+    pub r: BigInt,
     /// s (32 bytes)
-    s: BigInt,
+    pub s: BigInt,
     /// recovery id (1 byte)
-    recovery_id: u8,
+    pub recovery_id: u8,
 }
 
 impl Signature {
