@@ -70,18 +70,6 @@ pub fn convert_bits(data: &Vec<u8>, from: u32, to: u32, pad: bool) -> ConvertRes
     Ok(ret)
 }
 
-/// Get safely a slice from a vector corresponding to `range` or an option
-/// # Arguments
-/// `vec` vector
-/// `range` range
-pub fn get_slice<T>(vec: &Vec<T>, range: Range<usize>) -> Option<&[T]> {
-    if range.start > range.end || range.end > vec.len() {
-        None
-    } else {
-        Some(&vec[range])
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
