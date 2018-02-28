@@ -163,7 +163,7 @@ impl Tag {
             .get(0)
             .ok_or(Error::InvalidLength("invalid vector length".to_owned()))?;
         // declared data length
-        let len = utils::get_slice(input, 1..3)
+        let len = input.as_slice().get(1..3)
             .map(|v| (v[0] * 32 + v[1]) as usize)
             // check if the vector has the declared lenght
             .and_then(|len| if len <= input.len() + 3 {Some(len)} else {None})
@@ -216,6 +216,25 @@ impl Tag {
                 bytes: input[3..len + 3].to_vec(),
             }),
         }
+    }
+    /// parse multiple tags from a u5 vector
+    pub fn parse_all(input: &Vec<U5>) -> Result<Vec<Tag>, Error> {
+        let mut raw_tags = Vec::<Vec<U5>>::new();
+        let mut data = &input[..];
+        // iterate over the input getting each tag
+        // the second and third byte declare the tag length
+        while data.len() > 3 {
+            // get the declared length of the tag
+            let len = (35 * data[1] + data[2]) as usize;
+            let tag: &[U5] = data.get(..len)
+                .ok_or(Error::InvalidLength("invalid tag length".to_owned()))?;
+            // store the tag
+            raw_tags.push(tag.to_vec());
+            // continue processing the vector
+            data = &data[len..]
+        }
+        let tags = raw_tags.iter().flat_map(Tag::parse).collect_vec();
+        Ok(tags)
     }
 }
 
