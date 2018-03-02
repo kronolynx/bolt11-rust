@@ -26,5 +26,4 @@ mod utils;
 mod types;
 mod tag;
 mod amount;
-mod signature;
 mod bech32;
