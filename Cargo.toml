@@ -1,15 +1,16 @@
 [package]
 name = "lightning_payencode"
 version = "0.1.0"
-authors = ["Johann Og <johann@stampery.com>"]
+authors = ["Johann Ortiz <johann@stampery.com>"]
 
 [dependencies]
 num = "0.1.41"
 itertools = "0.7.6"
-bech32 = "0.2.2"
 hex="0.3.1"
-base58 = "0.1.0"
+base58check = "0.0.1"
 lazy_static = "1.0"
 byteorder = "1.2.1"
+libsecp256k1 = "0.1.13"
+rust-crypto = "0.2.36"
 
 
