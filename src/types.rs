@@ -6,6 +6,8 @@ use std::io;
 use utils::convert_bits;
 use std::num;
 use std::string;
+use bech32;
+use secp256k1;
 
 /// Alias for u8 that contains 5-bit values
 pub type U5 = u8;
@@ -69,6 +71,10 @@ pub enum Error {
     ParseFloatErr(num::ParseFloatError),
     /// Wraps string from utf8 error
     FromUTF8Err(string::FromUtf8Error),
+    /// Wraps bech32 error
+    Bech32Err(bech32::Error),
+    /// Wraps secp256k1 error
+    SignatureError(secp256k1::Error),
 }
 
 impl fmt::Display for Error {
@@ -80,6 +86,8 @@ impl fmt::Display for Error {
             Error::IOErr(ref e) => write!(f, "{}", e),
             Error::ParseFloatErr(ref e) => write!(f, "{}", e),
             Error::FromUTF8Err(ref e) => write!(f, "{}", e),
+            Error::Bech32Err(ref e) => write!(f, "{}", e),
+            Error::SignatureError(ref e) => write!(f, "{:?}", e),
         }
     }
 }
@@ -93,6 +101,14 @@ impl error::Error for Error {
             Error::IOErr(ref e) => error::Error::description(e),
             Error::ParseFloatErr(ref e) => error::Error::description(e),
             Error::FromUTF8Err(ref e) => error::Error::description(e),
+            Error::Bech32Err(ref e) => error::Error::description(e),
+            Error::SignatureError(ref e) => match *e {
+                secp256k1::Error::InvalidSignature => "invalid signature",
+                secp256k1::Error::InvalidPublicKey => "invalid public key",
+                secp256k1::Error::InvalidSecretKey => "invalid secret key",
+                secp256k1::Error::InvalidRecoveryId => "invalid recovery id",
+                secp256k1::Error::InvalidMessage => "invalid message",
+            },
         }
     }
     fn cause(&self) -> Option<&error::Error> {
@@ -123,16 +139,34 @@ impl From<string::FromUtf8Error> for Error {
     }
 }
 
-#[test]
-fn u5_test() {
-    let u5_vec = vec![
-        14, 20, 15, 7, 13, 26, 0, 25, 18, 6, 11, 13, 8, 21, 4, 20, 3, 17, 2, 29, 3, 12, 29, 3, 4,
-        15, 24, 20, 6, 14, 30, 22,
-    ];
-    let u8_vec = vec![
-        117, 30, 118, 232, 25, 145, 150, 212, 84, 148, 28, 69, 209, 179, 163, 35, 241, 67, 59, 214
-    ];
+impl From<bech32::Error> for Error {
+    fn from(e: bech32::Error) -> Error {
+        Error::Bech32Err(e)
+    }
+}
 
-    assert!(VecU5::to_u8_vec(&u5_vec).unwrap().eq(&u8_vec));
-    assert!(VecU5::from_u8_vec(&u8_vec).unwrap().eq(&u5_vec));
+impl From<secp256k1::Error> for Error {
+    fn from(e: secp256k1::Error) -> Error {
+        Error::SignatureError(e)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn u5_test() {
+        let u5_vec = vec![
+            14, 20, 15, 7, 13, 26, 0, 25, 18, 6, 11, 13, 8, 21, 4, 20, 3, 17, 2, 29, 3, 12, 29, 3,
+            4, 15, 24, 20, 6, 14, 30, 22,
+        ];
+        let u8_vec = vec![
+            117, 30, 118, 232, 25, 145, 150, 212, 84, 148, 28, 69, 209, 179, 163, 35, 241, 67, 59,
+            214,
+        ];
+
+        assert!(VecU5::to_u8_vec(&u5_vec).unwrap().eq(&u8_vec));
+        assert!(VecU5::from_u8_vec(&u8_vec).unwrap().eq(&u5_vec));
+    }
 }
