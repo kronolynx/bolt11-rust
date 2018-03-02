@@ -27,3 +27,4 @@ mod types;
 mod tag;
 mod amount;
 mod bech32;
+mod payment_request;
