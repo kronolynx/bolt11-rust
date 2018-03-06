@@ -7,6 +7,7 @@ use secp256k1::{Message, PublicKey, Signature};
 use crypto::sha2::Sha256;
 use crypto::digest::Digest;
 use amount::Amount;
+use std::fmt;
 
 /// Lightning Payment Request
 /// * see https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md
@@ -70,6 +71,28 @@ impl PaymentRequest {
         }
     }
 
+    /// the payment hash
+    pub fn payment_hash(&self) -> Option<Vec<u8>> {
+        self.tags
+            .iter()
+            .filter_map(|v| match *v {
+                Tag::PaymentHash { ref hash } => Some(hash.to_owned()),
+                _ => None,
+            })
+            .next()
+    }
+
+    /// the description of the payment or its hash
+    pub fn description(&self) -> Option<Description> {
+        self.tags
+            .iter()
+            .filter_map(|v| match *v {
+                Tag::Description { .. } | Tag::DescriptionHash { .. } => Description::new(v),
+                _ => None,
+            })
+            .next()
+    }
+
     // parse the message
     fn parse_message(hrp: &String, bytes: &Vec<u8>) -> Message {
         let mut raw_message = [0u8; 32];
@@ -95,14 +118,41 @@ impl PaymentRequest {
     }
 }
 
+/// PaymentRequest description
+pub enum Description {
+    Tag(String),
+    HashTag(Vec<u8>),
+}
+
+impl Description {
+    /// Retrieve the description from the tag
+    pub fn new(tag: &Tag) -> Option<Description> {
+        match *tag {
+            Tag::Description { ref description } => Some(Description::Tag(description.to_owned())),
+            Tag::DescriptionHash { ref hash } => Some(Description::HashTag(hash.to_owned())),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Description {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Description::Tag(ref description) => write!(f, "{}", description),
+            Description::HashTag(ref hash) => write!(f, "{}", ::utils::to_hex(&hash)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use lazy_static;
+    use utils::from_hex;
 
     lazy_static!{
-         static ref SEC_KEY : secp256k1::SecretKey = {
-            let key = ::utils::from_hex(
+         static ref SEC_KEY: secp256k1::SecretKey = {
+            let key = from_hex(
                 "e126f68f7eafcc8b74f54d269fe206be715000f94dac067d1c04a8ca3b2db734",
             ).unwrap()
                 .iter()
@@ -113,7 +163,7 @@ mod test {
                 });
             secp256k1::SecretKey::parse(&key).unwrap()
          };
-         static ref PUB_KEY : secp256k1::PublicKey = secp256k1::PublicKey::from_secret_key(&SEC_KEY);
+         static ref PUB_KEY: secp256k1::PublicKey = secp256k1::PublicKey::from_secret_key(&SEC_KEY);
     }
 
     #[test]
@@ -123,7 +173,17 @@ mod test {
         n449d9p5uxz9ezhhypd0elx87sjle52x86fux2ypatgddc6k63n7erqz25le42c4u4ecky03ylcqca784w";
 
         let pay_request = PaymentRequest::read(&tx_ref).unwrap();
-        assert!(pay_request.prefix == "lnbc");
+
+        let payment_hash =
+            from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        assert_eq!(pay_request.prefix, "lnbc");
         assert!(pay_request.amount.is_none());
+        assert_eq!(pay_request.payment_hash().unwrap(), payment_hash);
+        assert_eq!(pay_request.timestamp, 1496314658u64);
+        assert_eq!(
+            pay_request.description().unwrap().to_string(),
+            "Please consider supporting this project".to_owned()
+        );
     }
 }
