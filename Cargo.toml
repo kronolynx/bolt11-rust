@@ -12,5 +12,6 @@ lazy_static = "1.0"
 byteorder = "1.2.1"
 libsecp256k1 = "0.1.13"
 rust-crypto = "0.2.36"
+bitcoin-bech32 = "0.3.1"
 
 

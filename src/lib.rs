@@ -10,6 +10,8 @@
 //! [Lightning BOLT11 Specification](https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md)
 //! for providing a minimal QR-code-ready format for requesting lightning payments.
 
+extern crate base58check;
+extern crate bitcoin_bech32;
 extern crate byteorder;
 extern crate crypto;
 extern crate hex;
