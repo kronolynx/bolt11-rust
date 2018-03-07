@@ -178,8 +178,8 @@ impl Bech32 {
         })
     }
 }
-
-fn create_checksum(hrp: &Vec<u8>, data: &Vec<u8>) -> Vec<u8> {
+/// verify checksum
+pub fn create_checksum(hrp: &Vec<u8>, data: &Vec<u8>) -> Vec<u8> {
     let mut values: Vec<u8> = hrp_expand(hrp);
     values.extend_from_slice(data);
     // Pad with 6 zeros
@@ -229,7 +229,7 @@ fn polymod(values: Vec<u8>) -> u32 {
 const SEP: char = '1';
 
 /// Encoding character set. Maps data value -> char
-const CHARSET: [char; 32] = [
+pub const CHARSET: [char; 32] = [
     'q', 'p', 'z', 'r', 'y', '9', 'x', '8', 'g', 'f', '2', 't', 'v', 'd', 'w', '0', 's', '3', 'j',
     'n', '5', '4', 'k', 'h', 'c', 'e', '6', 'm', 'u', 'a', '7', 'l',
 ];
