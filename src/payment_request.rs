@@ -15,7 +15,7 @@ use bitcoin_bech32::constants::Network;
 
 /// Lightning Payment Request
 /// * see https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PaymentRequest {
     /// currency prefix; lnbc for bitcoin, lntb for bitcoin testnet
     pub prefix: String,
@@ -31,6 +31,8 @@ pub struct PaymentRequest {
     pub signature: Signature,
     // recovery id
     recovery_id: u8,
+    // message
+    message: Message,
 }
 
 impl PaymentRequest {
@@ -70,6 +72,7 @@ impl PaymentRequest {
                         tags,
                         signature,
                         recovery_id: recovery_id.serialize(),
+                        message,
                     })
                 } else {
                     Err(Error::SignatureError(secp256k1::Error::InvalidSignature))
@@ -173,6 +176,7 @@ impl PaymentRequest {
         bytes.to_u8_vec()
     }
 
+    /// the hash of this payment request
     pub fn hash(&self) -> Result<Vec<u8>, Error> {
         let amount = self.amount
             .map_or(String::new(), |a| Amount::encode(a as f64));
@@ -181,6 +185,7 @@ impl PaymentRequest {
             .map(|s| PaymentRequest::sha256_hasher(&[bytes, s].concat()).to_vec())
     }
 
+    /// encode to bech32 payment request
     pub fn write(&self) -> Result<String, Error> {
         let hr_amount = self.amount
             .map_or(String::new(), |a| Amount::encode(a as f64));
@@ -201,6 +206,18 @@ impl PaymentRequest {
         hrp.push_str("1");
         hrp.push_str(&stream_sum);
         Ok(hrp)
+    }
+
+    /// sign a payment request
+    pub fn sign(&self, secret_key: &SecretKey) -> Result<PaymentRequest, Error> {
+        match secp256k1::sign(&self.message, secret_key) {
+            Ok((signature, recovery_id)) => {
+                let mut signed = self.clone();
+                signed.signature = signature;
+                Ok(signed)
+            }
+            Err(e) => Err(Error::SignatureError(e)),
+        }
     }
 
     // parse the message
@@ -302,6 +319,7 @@ mod test {
         );
         assert_eq!(pay_request.fallback_address(), None);
         assert_eq!(pay_request.tags.len(), 2);
-        assert_eq!(pay_request.write().unwrap(), tx_ref)
+        assert_eq!(pay_request.write().unwrap(), tx_ref);
+        assert_eq!(pay_request.sign(&SEC_KEY).unwrap().write().unwrap(), tx_ref);
     }
 }
