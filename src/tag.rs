@@ -14,7 +14,7 @@ lazy_static! {
         'm' => 27,'u' => 28,'a' => 29,'7' => 30,'l' => 31];
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 /// Tag
 pub enum Tag {
     /// Payment Hash Tag
@@ -237,7 +237,7 @@ impl Tag {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 /// entries containing extra routing information for a private route
 pub struct ExtraHop {
     /// public key (264 bits)
