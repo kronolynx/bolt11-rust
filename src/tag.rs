@@ -1,14 +1,13 @@
 //! Tag
 
-use types::{Error, U5, VecU5};
+use types::{Error, U5, U5Conversions, U64VecU5Conversions, U8Conversions};
 use std::collections::HashMap;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use itertools::Itertools;
-use utils;
 
 /// Bech32 alphabet
 lazy_static! {
-    static ref BECH32_ALPHABET: HashMap<char, u8> =
+    pub static ref BECH32_ALPHABET: HashMap<char, u8> =
         hashmap!['q' => 0,'p' => 1,'z' => 2,'r' => 3,'y' => 4,'9' => 5,'x' => 6,'8' => 7,'g' => 8,
         'f' => 9,'2' => 10,'t' => 11,'v' => 12,'d' => 13,'w' => 14,'0' => 15,'s' => 16,'3' => 17,
         'j' => 18,'n' => 19,'5' => 20,'4' => 21,'k' => 22,'h' => 23, 'c' => 24, 'e' => 25,'6' => 26,
@@ -81,22 +80,22 @@ impl Tag {
     pub fn to_vec_u5(&self) -> Result<Vec<U5>, Error> {
         match &self {
             &&Tag::PaymentHash { ref hash } => {
-                let bytes = VecU5::from_u8_vec(hash);
+                let bytes = hash.to_u5_vec();
                 let p = BECH32_ALPHABET[&'p'];
                 Tag::vec_u5_aux(p, bytes)
             }
             &&Tag::Description { ref description } => {
-                let bytes = VecU5::from_u8_vec(&description.as_bytes().to_vec());
+                let bytes = description.as_bytes().to_vec().to_u5_vec();
                 let d = BECH32_ALPHABET[&'d'];
                 Tag::vec_u5_aux(d, bytes)
             }
             &&Tag::DescriptionHash { ref hash } => {
-                let bytes = VecU5::from_u8_vec(hash);
+                let bytes = hash.to_u5_vec();
                 let h = BECH32_ALPHABET[&'h'];
                 Tag::vec_u5_aux(h, bytes)
             }
             &&Tag::FallbackAddress { version, ref hash } => {
-                let bytes = VecU5::from_u8_vec(hash).map(|b| {
+                let bytes = hash.to_u5_vec().map(|b| {
                     let mut data = vec![version];
                     data.extend(b);
                     data
@@ -105,12 +104,12 @@ impl Tag {
                 Tag::vec_u5_aux(f, bytes)
             }
             &&Tag::Expiry { seconds } => {
-                let bytes = VecU5::from_u64(seconds);
+                let bytes = seconds.to_u5_vec();
                 let x = BECH32_ALPHABET[&'x'];
                 Tag::write_size(bytes.len()).map(|size| [vec![x], size, bytes].concat())
             }
             &&Tag::MinFinalCltvExpiry { blocks } => {
-                let bytes = VecU5::from_u64(blocks);
+                let bytes = blocks.to_u5_vec();
                 let c = BECH32_ALPHABET[&'c'];
                 Tag::write_size(bytes.len()).map(|size| [vec![c], size, bytes].concat())
             }
@@ -121,7 +120,7 @@ impl Tag {
                         acc.extend(hop);
                         acc
                     })
-                    .and_then(|v| VecU5::from_u8_vec(&v));
+                    .and_then(|v| v.to_u5_vec());
 
                 let r = BECH32_ALPHABET[&'r'];
                 Tag::vec_u5_aux(r, bytes)
@@ -144,7 +143,7 @@ impl Tag {
     }
 
     fn write_size(size: usize) -> Result<Vec<U5>, Error> {
-        let output = VecU5::from_u64(size as u64);
+        let output = (size as u64).to_u5_vec();
         match output.len() {
             0 => Ok(vec![0u8, 0]),
             1 => Ok([vec![0u8], output].concat()),
@@ -171,22 +170,22 @@ impl Tag {
 
         match tag {
             p if p == BECH32_ALPHABET[&'p'] => {
-                let hash_result = VecU5::to_u8_vec(&input[3..55].to_vec());
+                let hash_result = input[3..55].to_vec().to_u8_vec();
                 hash_result.map(|hash| Tag::PaymentHash { hash })
             }
             d if d == BECH32_ALPHABET[&'d'] => {
-                let description_result = VecU5::to_u8_vec(&input[3..len + 3].to_vec());
+                let description_result = input[3..len + 3].to_vec().to_u8_vec();
                 description_result
                     .and_then(|v| String::from_utf8(v).map_err(Error::FromUTF8Err))
                     .map(|description| Tag::Description { description })
             }
             h if h == BECH32_ALPHABET[&'h'] => {
-                let hash_result = VecU5::to_u8_vec(&input[3..len + 3].to_vec());
+                let hash_result = input[3..len + 3].to_vec().to_u8_vec();
                 hash_result.map(|hash| Tag::DescriptionHash { hash })
             }
             f if f == BECH32_ALPHABET[&'f'] => {
                 let version = input[3];
-                let hash_result = VecU5::to_u8_vec(&input[4..len + 3].to_vec());
+                let hash_result = input[4..len + 3].to_vec().to_u8_vec();
                 match version {
                     v if v <= 18u8 => {
                         hash_result.map(|hash| Tag::FallbackAddress { version, hash })
@@ -198,17 +197,17 @@ impl Tag {
                 }
             }
             r if r == BECH32_ALPHABET[&'r'] => {
-                let data_result = VecU5::to_u8_vec(&input[3..len + 3].to_vec());
+                let data_result = input[3..len + 3].to_vec().to_u8_vec();
                 data_result
                     .map(ExtraHop::parse_all)
                     .map(|path| Tag::RoutingInfo { path })
             }
             x if x == BECH32_ALPHABET[&'x'] => {
-                let seconds = VecU5::to_u64(len, &input[3..len + 3].to_vec());
+                let seconds = input[3..len + 3].to_vec().u5_vec_to_u64(len);
                 Ok(Tag::Expiry { seconds })
             }
             c if c == BECH32_ALPHABET[&'c'] => {
-                let blocks = VecU5::to_u64(len, &input[3..len + 3].to_vec());
+                let blocks = input[3..len + 3].to_vec().u5_vec_to_u64(len);
                 Ok(Tag::MinFinalCltvExpiry { blocks })
             }
             _ => Ok(Tag::UnknownTag {
@@ -244,11 +243,11 @@ pub struct ExtraHop {
     /// public key (264 bits)
     pub pub_key: Vec<u8>,
     pub short_channel_id: u64,
-     /// big endian
+    /// big endian
     pub fee_base_msat: u32,
-     /// big endian
+    /// big endian
     pub fee_proportional_millionths: u32,
-     /// big endian
+    /// big endian
     pub cltv_expiry_delta: u16,
 }
 

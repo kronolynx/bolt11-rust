@@ -1,7 +1,7 @@
 use bech32::{Bech32, create_checksum as bech32_checksum, CHARSET};
 use tag::Tag;
 use timestamp::Timestamp;
-use types::{Error, U5, VecU5};
+use types::{Error, U5, U5Conversions, U8Conversions};
 use secp256k1;
 use secp256k1::{Message, PublicKey, SecretKey, Signature};
 use crypto::sha2::Sha256;
@@ -37,7 +37,7 @@ impl PaymentRequest {
     pub fn read(input: &str) -> Result<PaymentRequest, Error> {
         let Bech32 { hrp, data } = Bech32::from_string(input.to_owned())?;
 
-        let mut bytes = VecU5::to_u8_vec(&data)?;
+        let mut bytes = data.to_u8_vec()?;
         match bytes.len() {
             len if len >= 65 * 8 => Err(Error::InvalidLength(
                 "data is too short to contain a 65 bytes signature".to_owned(),
@@ -48,7 +48,7 @@ impl PaymentRequest {
 
                 let signature = PaymentRequest::parse_signature(&bytes.split_off(len - 65));
 
-                let mut data = VecU5::from_u8_vec(&bytes)?;
+                let mut data = bytes.to_u5_vec()?;
 
                 let timestamp = Timestamp::decode(&data.drain(..7).collect::<Vec<_>>());
                 let tags = Tag::parse_all(&data)?;
@@ -170,7 +170,7 @@ impl PaymentRequest {
             .concat();
         let bytes = [Timestamp::encode(self.timestamp), bytes].concat();
 
-        VecU5::to_u8_vec(&bytes)
+        bytes.to_u8_vec()
     }
 
     pub fn hash(&self) -> Result<Vec<u8>, Error> {
@@ -190,7 +190,7 @@ impl PaymentRequest {
             self.signature.serialize().to_vec(),
             vec![self.recovery_id],
         ].concat();
-        let u5_stream = VecU5::from_u8_vec(&stream)?;
+        let u5_stream = stream.to_u5_vec()?;
         let checksum = bech32_checksum(&hrp.as_bytes().to_vec(), &u5_stream);
 
         let stream_sum = [u5_stream, checksum]
@@ -279,16 +279,6 @@ mod test {
             secp256k1::SecretKey::parse(&key).unwrap()
          };
          static ref PUB_KEY: secp256k1::PublicKey = secp256k1::PublicKey::from_secret_key(&SEC_KEY);
-    }
-    fn parse_public_key(bytes: &Vec<u8>) -> Result<PublicKey, Error> {
-        let pub_key_raw = bytes
-            .iter()
-            .enumerate()
-            .fold([0u8; 65], |mut acc, (index, item)| {
-                acc[index] = *item;
-                acc
-            });
-        secp256k1::PublicKey::parse(&pub_key_raw).map_err(Error::from)
     }
 
     #[test]

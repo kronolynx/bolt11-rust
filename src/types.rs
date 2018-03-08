@@ -8,17 +8,24 @@ use std::num;
 use std::string;
 use bech32;
 use secp256k1;
+use std::fmt::Write;
 
 /// Alias for u8 that contains 5-bit values
 pub type U5 = u8;
 
-/// Methods for Vec<U5>
-pub struct VecU5;
-
-impl VecU5 {
+pub trait U5Conversions {
     /// convert a vector of 5-bit values to hex-string
-    pub fn to_hex(bytes: &Vec<U5>) -> String {
-        let u5 = bytes.iter().fold(BigUint::from(0u64), |mut s, b| {
+    fn u5_to_hex(&self) -> String;
+    /// Convert a vector containing u5 values to u8
+    fn to_u8_vec(&self) -> ConvertResult;
+    /// Convert a vector of u5 values to u64
+    fn u5_vec_to_u64(&self, length: usize) -> u64;
+}
+
+impl U5Conversions for Vec<U5> {
+    /// convert a vector of 5-bit values to hex-string
+    fn u5_to_hex(&self) -> String {
+        let u5 = self.iter().fold(BigUint::from(0u64), |mut s, b| {
             s <<= 5;
             s |= BigUint::from(*b);
             s
@@ -26,30 +33,83 @@ impl VecU5 {
         u5.to_str_radix(16)
     }
     /// Convert a vector containing u5 values to u8
-    pub fn to_u8_vec(bytes: &Vec<U5>) -> ConvertResult {
-        convert_bits(bytes, 5, 8, false)
+    fn to_u8_vec(&self) -> ConvertResult {
+        convert_bits(self, 5, 8, false)
     }
-    /// Convert a vector containing u8 values to u5
-    pub fn from_u8_vec(bytes: &Vec<u8>) -> ConvertResult {
-        convert_bits(bytes, 8, 5, true)
+    /// Convert a vector of u5 values to u64
+    fn u5_vec_to_u64(&self, length: usize) -> u64 {
+        self.iter()
+            .take(length)
+            .fold(0u64, |acc, i| acc * 32u64 + *i as u64)
     }
+}
 
-    /// Convert a long to a vector containing u5 values
-    pub fn from_u64(value: u64) -> Vec<U5> {
+pub trait U8Conversions {
+    /// Convert a vector containing u8 values to u5
+    fn to_u5_vec(&self) -> ConvertResult;
+    /// Convert a vector of u8 to hex-string
+    fn to_hex_string(&self) -> String;
+}
+
+impl U8Conversions for Vec<u8> {
+    /// Convert a vector containing u8 values to u5
+    fn to_u5_vec(&self) -> ConvertResult {
+        convert_bits(self, 8, 5, true)
+    }
+    /// Convert a vector of u8 to hex-string
+    fn to_hex_string(&self) -> String {
+        self.iter().fold(String::new(), |mut acc: String, b: &u8| {
+            write!(&mut acc, "{:02x}", b).expect("Unable to write");
+            acc
+        })
+    }
+}
+
+pub trait StringConversions {
+    /// Convert a hex string to bytes
+    fn hex_to_bytes(&self) -> Result<Vec<u8>, num::ParseIntError>;
+}
+
+impl StringConversions for String {
+    fn hex_to_bytes(&self) -> Result<Vec<u8>, num::ParseIntError> {
+        /// split a string in chunks, the length of the string must be even
+        fn split_n(s: &str, n: usize) -> Vec<&str> {
+            (0..(s.len() - n + 1) / 2 + 1)
+                .map(|i| &s[2 * i..2 * i + n])
+                .collect()
+        }
+
+        let padded: String = if self.len() % 2 != 0 {
+            let mut s = String::from("0");
+            s.push_str(self);
+            s
+        } else {
+            self.to_owned()
+        };
+
+        split_n(&padded.trim()[..], 2)
+            .iter()
+            .map(|b| u8::from_str_radix(b, 16))
+            .collect::<Result<Vec<u8>, _>>()
+    }
+}
+
+pub trait U64VecU5Conversions {
+    /// Convert a u64 to a vector containing u5 values
+    fn to_u5_vec(&self) -> Vec<U5>;
+}
+
+impl U64VecU5Conversions for u64 {
+    /// Convert a u64 to a vector containing u5 values
+    fn to_u5_vec(&self) -> Vec<U5> {
         let mut acc = Vec::<U5>::new();
-        let mut val = value;
+        let mut val = *self;
         while val > 0 {
             acc.push((val % 32) as U5);
             val /= 32;
         }
         acc.reverse();
         acc
-    }
-    /// Convert a vector of u5 values to u64
-    pub fn to_u64(length: usize, data: &Vec<U5>) -> u64 {
-        data.iter()
-            .take(length)
-            .fold(0u64, |acc, i| acc * 32u64 + *i as u64)
     }
 }
 
@@ -166,7 +226,7 @@ mod test {
             214,
         ];
 
-        assert!(VecU5::to_u8_vec(&u5_vec).unwrap().eq(&u8_vec));
-        assert!(VecU5::from_u8_vec(&u8_vec).unwrap().eq(&u5_vec));
+        assert!(u5_vec.to_u8_vec().unwrap().eq(&u8_vec));
+        assert!(u8_vec.to_u5_vec().unwrap().eq(&u5_vec));
     }
 }
