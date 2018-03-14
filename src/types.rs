@@ -4,6 +4,7 @@ use num::bigint::BigUint;
 use std::{error, fmt};
 use std::io;
 use utils::convert_bits;
+use utils::convert;
 use std::num;
 use std::string;
 use bech32;
@@ -17,7 +18,7 @@ pub trait U5Conversions {
     /// convert a vector of 5-bit values to hex-string
     fn u5_to_hex(&self) -> String;
     /// Convert a vector containing u5 values to u8
-    fn to_u8_vec(&self) -> ConvertResult;
+    fn to_u8_vec(&self, padding: bool) -> ConvertResult;
     /// Convert a vector of u5 values to u64
     fn u5_vec_to_u64(&self, length: usize) -> u64;
 }
@@ -33,8 +34,8 @@ impl U5Conversions for Vec<U5> {
         u5.to_str_radix(16)
     }
     /// Convert a vector containing u5 values to u8
-    fn to_u8_vec(&self) -> ConvertResult {
-        convert_bits(self, 5, 8, false)
+    fn to_u8_vec(&self, padding: bool) -> ConvertResult {
+        convert_bits(self, 5, 8, padding)
     }
     /// Convert a vector of u5 values to u64
     fn u5_vec_to_u64(&self, length: usize) -> u64 {
@@ -46,15 +47,15 @@ impl U5Conversions for Vec<U5> {
 
 pub trait U8Conversions {
     /// Convert a vector containing u8 values to u5
-    fn to_u5_vec(&self) -> ConvertResult;
+    fn to_u5_vec(&self, padding: bool) -> ConvertResult;
     /// Convert a vector of u8 to hex-string
     fn to_hex_string(&self) -> String;
 }
 
 impl U8Conversions for Vec<u8> {
     /// Convert a vector containing u8 values to u5
-    fn to_u5_vec(&self) -> ConvertResult {
-        convert_bits(self, 8, 5, true)
+    fn to_u5_vec(&self, padding: bool) -> ConvertResult {
+        convert_bits(self, 8, 5, padding)
     }
     /// Convert a vector of u8 to hex-string
     fn to_hex_string(&self) -> String {
@@ -119,6 +120,8 @@ pub type ConvertResult = Result<Vec<u8>, Error>;
 /// Error types
 #[derive(Debug)]
 pub enum Error {
+    /// Invalid parameter
+    InvalidParameter(String),
     /// Input value exceeds "from bits" size
     InvalidInputValue(u8),
     /// Invalid padding values in data
@@ -129,6 +132,8 @@ pub enum Error {
     IOErr(io::Error),
     /// Wraps parse float error
     ParseFloatErr(num::ParseFloatError),
+    /// Wraps parse int error
+    ParseIntErr(num::ParseIntError),
     /// Wraps string from utf8 error
     FromUTF8Err(string::FromUtf8Error),
     /// Wraps bech32 error
@@ -140,11 +145,13 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            Error::InvalidParameter(ref e) => write!(f, "{}", e),
             Error::InvalidInputValue(b) => write!(f, "invalid input value ({})", b),
             Error::InvalidPadding => write!(f, "invalid padding"),
             Error::InvalidLength(ref e) => write!(f, "{}", e),
             Error::IOErr(ref e) => write!(f, "{}", e),
             Error::ParseFloatErr(ref e) => write!(f, "{}", e),
+            Error::ParseIntErr(ref e) => write!(f, "{}", e),
             Error::FromUTF8Err(ref e) => write!(f, "{}", e),
             Error::Bech32Err(ref e) => write!(f, "{}", e),
             Error::SignatureError(ref e) => write!(f, "{:?}", e),
@@ -155,11 +162,13 @@ impl fmt::Display for Error {
 impl error::Error for Error {
     fn description(&self) -> &str {
         match *self {
+            Error::InvalidParameter(ref e) => e,
             Error::InvalidInputValue(_) => "invalid input value",
             Error::InvalidPadding => "invalid padding",
             Error::InvalidLength(ref e) => e,
             Error::IOErr(ref e) => error::Error::description(e),
             Error::ParseFloatErr(ref e) => error::Error::description(e),
+            Error::ParseIntErr(ref e) => error::Error::description(e),
             Error::FromUTF8Err(ref e) => error::Error::description(e),
             Error::Bech32Err(ref e) => error::Error::description(e),
             Error::SignatureError(ref e) => match *e {
@@ -175,6 +184,7 @@ impl error::Error for Error {
         match *self {
             Error::IOErr(ref e) => Some(e),
             Error::ParseFloatErr(ref e) => Some(e),
+            Error::ParseIntErr(ref e) => Some(e),
             Error::FromUTF8Err(ref e) => Some(e),
             _ => None,
         }
@@ -190,6 +200,12 @@ impl From<io::Error> for Error {
 impl From<num::ParseFloatError> for Error {
     fn from(e: num::ParseFloatError) -> Error {
         Error::ParseFloatErr(e)
+    }
+}
+
+impl From<num::ParseIntError> for Error {
+    fn from(e: num::ParseIntError) -> Error {
+        Error::ParseIntErr(e)
     }
 }
 
@@ -215,6 +231,45 @@ impl From<secp256k1::Error> for Error {
 mod test {
     use super::*;
 
+    /// vec u8 to vec u5
+    fn eight2five(input: &Vec<u8>) -> Vec<U5> {
+        let mut buffer = 0u64;
+        let mut output = Vec::<U5>::new();
+        let mut count = 0u64;
+        for b in input {
+            buffer = (buffer << 8) | (*b as u64 & 0xff);
+            count += 8;
+            while count >= 5 {
+                output.push(((buffer >> (count - 5)) & 31) as u8);
+                count -= 5
+            }
+        }
+        output
+    }
+
+    /// vec u5 to vec u8
+    fn five2eight(input: &Vec<U5>) -> Vec<u8> {
+        let mut buffer = 0u64;
+        let mut output = Vec::<U5>::new();
+        let mut count = 0u64;
+        for b in input {
+            buffer = (buffer << 5) | (*b as u64 & 31);
+            count += 5;
+            while count >= 8 {
+                output.push(((buffer >> (count - 8)) & 0xff) as u8);
+                count -= 8
+            }
+        }
+        assert!(count <= 4, "Zero-padding of more than 4 bits");
+        assert_eq!(
+            buffer & ((1 << count) - 1),
+            0,
+            "Non-zero padding in 8-to-5 conversion"
+        );
+
+        output
+    }
+
     #[test]
     fn u5_test() {
         let u5_vec = vec![
@@ -226,7 +281,9 @@ mod test {
             214,
         ];
 
-        assert!(u5_vec.to_u8_vec().unwrap().eq(&u8_vec));
-        assert!(u8_vec.to_u5_vec().unwrap().eq(&u5_vec));
+        assert!(u5_vec.to_u8_vec(false).unwrap().eq(&u8_vec));
+        assert!(u8_vec.to_u5_vec(true).unwrap().eq(&u5_vec));
+        assert!(eight2five(&u8_vec).eq(&u5_vec));
+        assert!(five2eight(&u5_vec).eq(&u8_vec));
     }
 }

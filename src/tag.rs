@@ -80,22 +80,22 @@ impl Tag {
     pub fn to_vec_u5(&self) -> Result<Vec<U5>, Error> {
         match &self {
             &&Tag::PaymentHash { ref hash } => {
-                let bytes = hash.to_u5_vec();
+                let bytes = hash.to_u5_vec(true);
                 let p = BECH32_ALPHABET[&'p'];
                 Tag::vec_u5_aux(p, bytes)
             }
             &&Tag::Description { ref description } => {
-                let bytes = description.as_bytes().to_vec().to_u5_vec();
+                let bytes = description.as_bytes().to_vec().to_u5_vec(true);
                 let d = BECH32_ALPHABET[&'d'];
                 Tag::vec_u5_aux(d, bytes)
             }
             &&Tag::DescriptionHash { ref hash } => {
-                let bytes = hash.to_u5_vec();
+                let bytes = hash.to_u5_vec(true);
                 let h = BECH32_ALPHABET[&'h'];
                 Tag::vec_u5_aux(h, bytes)
             }
             &&Tag::FallbackAddress { version, ref hash } => {
-                let bytes = hash.to_u5_vec().map(|b| {
+                let bytes = hash.to_u5_vec(true).map(|b| {
                     let mut data = vec![version];
                     data.extend(b);
                     data
@@ -120,7 +120,7 @@ impl Tag {
                         acc.extend(hop);
                         acc
                     })
-                    .and_then(|v| v.to_u5_vec());
+                    .and_then(|v| v.to_u5_vec(true));
 
                 let r = BECH32_ALPHABET[&'r'];
                 Tag::vec_u5_aux(r, bytes)
@@ -170,22 +170,22 @@ impl Tag {
 
         match tag {
             p if p == BECH32_ALPHABET[&'p'] => {
-                let hash_result = input[3..55].to_vec().to_u8_vec();
+                let hash_result = input[3..55].to_vec().to_u8_vec(false);
                 hash_result.map(|hash| Tag::PaymentHash { hash })
             }
             d if d == BECH32_ALPHABET[&'d'] => {
-                let description_result = input[3..len + 3].to_vec().to_u8_vec();
+                let description_result = input[3..len + 3].to_vec().to_u8_vec(false);
                 description_result
                     .and_then(|v| String::from_utf8(v).map_err(Error::FromUTF8Err))
                     .map(|description| Tag::Description { description })
             }
             h if h == BECH32_ALPHABET[&'h'] => {
-                let hash_result = input[3..len + 3].to_vec().to_u8_vec();
+                let hash_result = input[3..len + 3].to_vec().to_u8_vec(false);
                 hash_result.map(|hash| Tag::DescriptionHash { hash })
             }
             f if f == BECH32_ALPHABET[&'f'] => {
                 let version = input[3];
-                let hash_result = input[4..len + 3].to_vec().to_u8_vec();
+                let hash_result = input[4..len + 3].to_vec().to_u8_vec(false);
                 match version {
                     v if v <= 18u8 => {
                         hash_result.map(|hash| Tag::FallbackAddress { version, hash })
@@ -197,7 +197,7 @@ impl Tag {
                 }
             }
             r if r == BECH32_ALPHABET[&'r'] => {
-                let data_result = input[3..len + 3].to_vec().to_u8_vec();
+                let data_result = input[3..len + 3].to_vec().to_u8_vec(false);
                 data_result
                     .map(ExtraHop::parse_all)
                     .map(|path| Tag::RoutingInfo { path })
@@ -224,7 +224,7 @@ impl Tag {
         // the second and third byte declare the tag length
         while data.len() > 3 {
             // get the declared length of the tag
-            let len = (35 * data[1] + data[2]) as usize;
+            let len = (data[1] * 32 + data[2] + 3) as usize;
             let tag: &[U5] = data.get(..len)
                 .ok_or(Error::InvalidLength("invalid tag length".to_owned()))?;
             // store the tag
