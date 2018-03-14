@@ -10,19 +10,34 @@ use types::Error;
 pub struct Amount;
 
 impl Amount {
-    /// value corresponding to a given letter
-    pub fn value(c: char) -> f64 {
-        match c {
-            'p' => 1000_000_000_000f64,
-            'n' => 1000_000_000f64,
-            'u' => 1000_000f64,
-            'm' => 1000f64,
-            _ => 1f64,
+    /// the unit allowing for the shortest representation possible
+    fn unit(amount: u64) -> char {
+        match amount * 10 {
+            pico if pico % 1000 > 0 => 'p',
+            pico if pico % 1000_000 > 0 => 'n',
+            pico if pico % 1000_000_000 > 0 => 'u',
+            _ => 'm',
         }
     }
-    /// multiplier letters
-    pub fn units<'a>() -> &'a [&'a str] {
-        &["p", "n", "u", "m"]
+
+    /// Given an encoded amount, convert it into millisatoshis
+    /// BOLT #11:
+    /// A reader SHOULD fail if `amount` contains a non-digit, or is followed by
+    /// anything except a `multiplier` in the table above.
+    /// # Arguments
+    /// * `amount` - A string that holds the amount to shorten
+    pub fn decode(amount: &str) -> Result<u64, Error> {
+        match amount.chars().last() {
+            Some(a) if a == 'p' => amount[..amount.len() - 1].parse::<u64>().map(|v| v / 10),
+            Some(a) if a == 'n' => amount[..amount.len() - 1].parse::<u64>().map(|v| v * 100),
+            Some(a) if a == 'u' => amount[..amount.len() - 1]
+                .parse::<u64>()
+                .map(|v| v * 100_000),
+            Some(a) if a == 'm' => amount[..amount.len() - 1]
+                .parse::<u64>()
+                .map(|v| v * 100_000_000),
+            _ => amount.parse::<u64>(),
+        }.map_err(Error::ParseIntErr)
     }
 
     /// Given an amount in Bitcoin, shorten it
@@ -30,37 +45,40 @@ impl Amount {
     /// BOLT #11:
     /// A writer MUST encode `amount` as a positive decimal integer with no
     /// leading zeroes, SHOULD use the shortest representation possible.
-    pub fn encode(amount: f64) -> String {
-        // encode amount aux helper
-        fn aux(amount: u64, units: &[&str]) -> String {
-            if units.len() == 0 {
-                amount.to_string()
-            } else if amount % 1000 == 0 {
-                aux(amount / 1000, &units[1..])
-            } else {
-                amount.to_string() + units[0]
-            }
+    pub fn encode(amount: u64) -> String {
+        match amount {
+            amt if Amount::unit(amt) == 'p' => format!("{}p", amt * 10),
+            amt if Amount::unit(amt) == 'n' => format!("{}n", amt / 100),
+            amt if Amount::unit(amt) == 'u' => format!("{}u", amt / 100_000),
+            amt if Amount::unit(amt) == 'm' => format!("{}m", amt / 100_000_000),
+            amt => amt.to_string(),
         }
-
-        let units = Amount::units();
-        // convert to pico initially
-        let pico_amount = (amount * Amount::value('p')) as u64;
-        aux(pico_amount, &units)
     }
+}
 
-    /// Given an encoded amount, convert it into a decimal
-    /// BOLT #11:
-    /// A reader SHOULD fail if `amount` contains a non-digit, or is followed by
-    /// anything except a `multiplier` in the table above.
-    /// # Arguments
-    /// * `amount` - A string that holds the amount to shorten
-    pub fn decode(amount: &str) -> Result<f64, Error> {
-        let unit_char = amount.chars().last().map(|c| Amount::value(c));
+pub enum BtcAmount {
+    Btc(f64),
+    MilliBtc(f64),
+    Satoshi(u64),
+    MilliSatoshi(u64),
+}
 
-        match unit_char {
-            Some(u) if u != 1f64 => amount[..amount.len() - 1].parse::<f64>().map(|v| v / u),
-            _ => amount.parse::<f64>(),
-        }.map_err(Error::ParseFloatErr)
+impl BtcAmount {
+    fn to_btc(&self) -> f64 {
+        match *self {
+            BtcAmount::Btc(a) => a,
+            BtcAmount::MilliBtc(a) => a / 1000f64,
+            BtcAmount::Satoshi(a) => unimplemented!(),
+            BtcAmount::MilliSatoshi(a) => unimplemented!(),
+        }
+    }
+    fn to_millisatoshi(&self) -> u64 {
+        match *self {
+            BtcAmount::Btc(a) => unimplemented!(),
+            BtcAmount::MilliBtc(a) => unimplemented!(),
+            BtcAmount::Satoshi(a) => unimplemented!(),
+            BtcAmount::MilliSatoshi(a) => unimplemented!(),
+        }
     }
 }
 
@@ -70,19 +88,26 @@ mod test {
     use std::collections::HashMap;
 
     #[test]
-    fn encode_decode_amount() {
-        let test: HashMap<&str, f64> = hashmap!(
-        "10p" => 10f64 / Amount::value('p'),
-        "1n" => 1000f64 / Amount::value('p'),
-        "1200p" => 1200f64 / Amount::value('p'),
-        "123u" => 123f64 / Amount::value('u'),
-        "123m" => 123f64 / 1000f64,
-        "3" => 3f64
-    );
+    fn minimal_amount_used() {
+        assert_eq!(Some('p'), Amount::encode(1).chars().last());
+        assert_eq!(Some('p'), Amount::encode(99).chars().last());
+        assert_eq!(Some('n'), Amount::encode(100).chars().last());
+        assert_eq!(Some('p'), Amount::encode(101).chars().last());
 
-        for (k, v) in test {
-            assert_eq!(k, Amount::encode(v));
-            assert_eq!(v, Amount::decode(&Amount::encode(v)).unwrap());
-        }
+        assert_eq!(Some('n'), Amount::encode(1000).chars().last());
+        assert_eq!(Some('u'), Amount::encode(100_000).chars().last());
+        assert_eq!(Some('n'), Amount::encode(101_000).chars().last());
+        assert_eq!(Some('u'), Amount::encode(1155_400_000).chars().last());
+
+        assert_eq!(Some('m'), Amount::encode(100_000_000).chars().last());
+        assert_eq!(Some('m'), Amount::encode(1000_000_000).chars().last());
+        assert_eq!(Some('m'), Amount::encode(100_000_000_000).chars().last());
+    }
+    #[test]
+    fn decode() {
+        assert_eq!(100_000_000u64, Amount::decode("1m").unwrap());
+        assert_eq!(100_000_000u64, Amount::decode("1000u").unwrap());
+        assert_eq!(100_000_000u64, Amount::decode("1000000n").unwrap());
+        assert_eq!(100_000_000u64, Amount::decode("1000000000p").unwrap());
     }
 }
