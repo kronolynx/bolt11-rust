@@ -81,6 +81,28 @@ impl PaymentRequest {
         }
     }
 
+    /// encode to bech32 payment request
+    pub fn encode(&self) -> Result<String, Error> {
+        let hr_amount = self.amount.map_or(String::new(), |a| Amount::encode(a));
+        let mut hrp = self.prefix.to_owned() + &hr_amount;
+        let stream = [
+            //            self.stream()?.to_u5_vec(true)?,
+            self.stream(),
+            self.signature.serialize().to_vec().to_u5_vec(true)?,
+            vec![self.recovery_id],
+        ].concat();
+
+        let checksum = bech32_checksum(&hrp.as_bytes().to_vec(), &stream);
+        let stream_sum = [stream, checksum]
+            .concat()
+            .iter()
+            .map(|i| CHARSET[*i as usize])
+            .collect::<String>();
+        hrp.push_str("1");
+        hrp.push_str(&stream_sum);
+        Ok(hrp)
+    }
+
     /// the payment hash
     pub fn payment_hash(&self) -> Option<Vec<u8>> {
         self.tags
@@ -164,46 +186,17 @@ impl PaymentRequest {
         self.tags.iter().filter_map(fallback).next()
     }
 
-    /// a representation of this payment request, without its signature, as a bit stream. This is what will be signed
-    fn stream(&self) -> Result<Vec<u8>, Error> {
-        let bytes = self.tags
-            .iter()
-            .flat_map(|tag| tag.to_vec_u5())
-            .collect_vec()
-            .concat();
-        let bytes = [Timestamp::encode(self.timestamp), bytes].concat();
-
-        bytes.to_u8_vec(false)
-    }
-
     /// the hash of this payment request
     pub fn hash(&self) -> Result<Vec<u8>, Error> {
         let amount = self.amount.map_or(String::new(), |a| Amount::encode(a));
         let bytes = (self.prefix.to_owned() + &amount).as_bytes().to_vec();
-        self.stream()
-            .map(|s| PaymentRequest::sha256_hasher(&[bytes, s].concat()).to_vec())
-    }
+        //        self.stream()
+        //            .map(|s| PaymentRequest::sha256_hasher(&[bytes, s.to_u8_vec(false)].concat()).to_vec())
 
-    /// encode to bech32 payment request
-    pub fn encode(&self) -> Result<String, Error> {
-        let hr_amount = self.amount.map_or(String::new(), |a| Amount::encode(a));
-        let mut hrp = self.prefix.to_owned() + &hr_amount;
-        let stream = [
-            self.stream()?,
-            self.signature.serialize().to_vec(),
-            vec![self.recovery_id],
-        ].concat();
-        let u5_stream = stream.to_u5_vec(true)?;
-        let checksum = bech32_checksum(&hrp.as_bytes().to_vec(), &u5_stream);
-
-        let stream_sum = [u5_stream, checksum]
-            .concat()
-            .iter()
-            .map(|i| CHARSET[*i as usize])
-            .collect::<String>();
-        hrp.push_str("1");
-        hrp.push_str(&stream_sum);
-        Ok(hrp)
+        Ok(
+            PaymentRequest::sha256_hasher(&[bytes, self.stream().to_u8_vec(false)?].concat())
+                .to_vec(),
+        )
     }
 
     /// sign a payment request
@@ -216,6 +209,17 @@ impl PaymentRequest {
             }
             Err(e) => Err(Error::SignatureError(e)),
         }
+    }
+
+    /// a representation of this payment request, without its signature, as a bit stream. This is what will be signed
+    fn stream(&self) -> Vec<U5> {
+        //Result<Vec<u8>, Error> {
+        let bytes = self.tags
+            .iter()
+            .flat_map(|tag| tag.to_vec_u5())
+            .collect_vec()
+            .concat();
+        [Timestamp::encode(self.timestamp), bytes].concat()
     }
 
     // parse the message
@@ -346,6 +350,7 @@ mod test {
         );
         assert_eq!(pay_request.fallback_address(), None);
         assert_eq!(pay_request.tags.len(), 3);
+        assert_eq!(pay_request.encode().unwrap(), tx_ref);
 //        assert_eq!(
 //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
 //            tx_ref
@@ -375,7 +380,11 @@ mod test {
         );
         assert_eq!(pay_request.fallback_address(), None);
         assert_eq!(pay_request.tags.len(), 2);
-        //        assert_eq!(pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(), tx_ref);
+        assert_eq!(pay_request.encode().unwrap(), tx_ref);
+//        assert_eq!(
+//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+//            tx_ref
+//        );
     }
     #[test]
     fn test3() {
@@ -401,7 +410,11 @@ mod test {
             Some("mk2QpYatsKicvFVuTAQLBryyccRXMUaGHP".to_owned())
         );
         assert_eq!(pay_request.tags.len(), 3);
-        //                    assert_eq!(pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(), tx_ref);
+        assert_eq!(pay_request.encode().unwrap(), tx_ref);
+//        assert_eq!(
+//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+//            tx_ref
+//        );
     }
     #[test]
     fn test4() {
@@ -437,7 +450,11 @@ mod test {
         //            assert_eq!(BinaryData(Protocol.writeUInt64(0x0102030405060708L, ByteOrder.BIG_ENDIAN)), BinaryData("0102030405060708"));
         //            assert_eq!(BinaryData(Protocol.writeUInt64(0x030405060708090aL, ByteOrder.BIG_ENDIAN)), BinaryData("030405060708090a"));
         assert_eq!(pay_request.tags.len(), 4);
-        //        assert_eq!(pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(), tx_ref);
+        assert_eq!(pay_request.encode().unwrap(), tx_ref);
+//        assert_eq!(
+//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+//            tx_ref
+//        );
     }
 
     #[test]
@@ -465,7 +482,11 @@ mod test {
             Some("3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX".to_owned())
         );
         assert_eq!(pay_request.tags.len(), 3);
-        //            assert_eq!(pay_request.sign(&SEC_KEY).unwrap().write().unwrap(), tx_ref);
+        assert_eq!(pay_request.encode().unwrap(), tx_ref);
+//        assert_eq!(
+//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+//            tx_ref
+//        );
     }
     #[test]
     fn test6() {
@@ -492,7 +513,11 @@ mod test {
             Some("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4".to_owned())
         );
         assert_eq!(pay_request.tags.len(), 3);
-        //            assert_eq!(pay_request.sign(&SEC_KEY).unwrap().write().unwrap(), tx_ref);
+        assert_eq!(pay_request.encode().unwrap(), tx_ref);
+//        assert_eq!(
+//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+//            tx_ref
+//        );
     }
 
     #[test]
@@ -519,7 +544,11 @@ mod test {
             Some("bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3".to_owned())
         );
         assert_eq!(pay_request.tags.len(), 3);
-        //            assert_eq!(pay_request.sign(&SEC_KEY).unwrap().write().unwrap(), tx_ref);
+        assert_eq!(pay_request.encode().unwrap(), tx_ref);
+//        assert_eq!(
+//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+//            tx_ref
+//        );
     }
     #[test]
     fn test9() {
@@ -546,7 +575,11 @@ mod test {
         );
         //            assert_eq!(pay_request.minFinalCltvExpiry, Some(12));
         assert_eq!(pay_request.tags.len(), 4);
-        //            assert_eq!(pay_request.sign(&SEC_KEY).unwrap().write().unwrap(), tx_ref);
+        assert_eq!(pay_request.encode().unwrap(), tx_ref);
+//        assert_eq!(
+//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+//            tx_ref
+//        );
     }
 
 }
