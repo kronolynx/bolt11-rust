@@ -66,8 +66,6 @@ pub fn convert_bits(data: &Vec<u8>, from: u32, to: u32, pad: bool) -> ConvertRes
         if bits > 0 {
             ret.push(((acc << (to - bits)) & maxv) as u8);
         }
-    } else if bits >= from || ((acc << (to - bits)) & maxv) != 0 {
-        return Err(Error::InvalidPadding);
     }
     Ok(ret)
 }
