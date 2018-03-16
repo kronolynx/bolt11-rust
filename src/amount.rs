@@ -56,32 +56,6 @@ impl Amount {
     }
 }
 
-pub enum BtcAmount {
-    Btc(f64),
-    MilliBtc(f64),
-    Satoshi(u64),
-    MilliSatoshi(u64),
-}
-
-impl BtcAmount {
-    fn to_btc(&self) -> f64 {
-        match *self {
-            BtcAmount::Btc(a) => a,
-            BtcAmount::MilliBtc(a) => a / 1000f64,
-            BtcAmount::Satoshi(a) => unimplemented!(),
-            BtcAmount::MilliSatoshi(a) => unimplemented!(),
-        }
-    }
-    fn to_millisatoshi(&self) -> u64 {
-        match *self {
-            BtcAmount::Btc(a) => unimplemented!(),
-            BtcAmount::MilliBtc(a) => unimplemented!(),
-            BtcAmount::Satoshi(a) => unimplemented!(),
-            BtcAmount::MilliSatoshi(a) => unimplemented!(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
