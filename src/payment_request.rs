@@ -1,5 +1,5 @@
 use bech32::{Bech32, create_checksum as bech32_checksum, CHARSET};
-use tag::Tag;
+use tag::{ExtraHop, Tag};
 use timestamp::Timestamp;
 use types::{Error, U5, U5Conversions, U8Conversions};
 use secp256k1;
@@ -125,6 +125,18 @@ impl PaymentRequest {
             .next()
     }
 
+    /// extra rounting info
+    pub fn routing_info(&self) -> Vec<ExtraHop> {
+        self.tags
+            .iter()
+            .filter_map(|v| match *v {
+                Tag::RoutingInfo { ref path } => Some(path.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect_vec()
+    }
+
     /// the fallback address if any. It could be a script address, pubkey address, ..
     pub fn fallback_address(&self) -> Option<String> {
         // encode fallback address
@@ -205,6 +217,7 @@ impl PaymentRequest {
             Ok((signature, recovery_id)) => {
                 let mut signed = self.clone();
                 signed.signature = signature;
+                signed.recovery_id = recovery_id.serialize();
                 Ok(signed)
             }
             Err(e) => Err(Error::SignatureError(e)),
@@ -351,10 +364,10 @@ mod test {
         assert_eq!(pay_request.fallback_address(), None);
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-//        assert_eq!(
-//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-//            tx_ref
-//        );
+        //        assert_eq!(
+        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+        //            tx_ref
+        //        );
     }
 
     #[test]
@@ -381,10 +394,10 @@ mod test {
         assert_eq!(pay_request.fallback_address(), None);
         assert_eq!(pay_request.tags.len(), 2);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-//        assert_eq!(
-//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-//            tx_ref
-//        );
+        //        assert_eq!(
+        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+        //            tx_ref
+        //        );
     }
     #[test]
     fn test3() {
@@ -411,10 +424,10 @@ mod test {
         );
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-//        assert_eq!(
-//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-//            tx_ref
-//        );
+        //        assert_eq!(
+        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+        //            tx_ref
+        //        );
     }
     #[test]
     fn test4() {
@@ -430,6 +443,29 @@ mod test {
         let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+        let routing_info = Tag::RoutingInfo {
+            path: vec![
+                ExtraHop {
+                    pub_key: from_hex(
+                        "029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255",
+                    ).unwrap(),
+                    short_channel_id: 72623859790382856u64,
+                    fee_base_msat: 1,
+                    fee_proportional_millionths: 20,
+                    cltv_expiry_delta: 3,
+                },
+                ExtraHop {
+                    pub_key: from_hex(
+                        "039e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255",
+                    ).unwrap(),
+                    short_channel_id: 217304205466536202u64,
+                    fee_base_msat: 2,
+                    fee_proportional_millionths: 30,
+                    cltv_expiry_delta: 4,
+                },
+            ],
+        };
+
         assert_eq!(pay_request.prefix, "lnbc");
         assert_eq!(pay_request.amount, Some(2000_000_000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
@@ -443,18 +479,18 @@ mod test {
             pay_request.fallback_address(),
             Some("1RustyRX2oai4EYYDpQGWvEL62BBGqN9T".to_owned())
         );
-        //            assert_eq!(pay_request.routingInfo, List(List(;
-        //                ExtraHop(PublicKey("029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255"), 72623859790382856L, 1, 20, 3),
-        //                ExtraHop(PublicKey("039e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255"), 217304205466536202L, 2, 30, 4)
-        //            )))
-        //            assert_eq!(BinaryData(Protocol.writeUInt64(0x0102030405060708L, ByteOrder.BIG_ENDIAN)), BinaryData("0102030405060708"));
-        //            assert_eq!(BinaryData(Protocol.writeUInt64(0x030405060708090aL, ByteOrder.BIG_ENDIAN)), BinaryData("030405060708090a"));
+        assert_eq!(
+            Tag::RoutingInfo {
+                path: pay_request.routing_info(),
+            },
+            routing_info
+        );
         assert_eq!(pay_request.tags.len(), 4);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-//        assert_eq!(
-//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-//            tx_ref
-//        );
+        //        assert_eq!(
+        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+        //            tx_ref
+        //        );
     }
 
     #[test]
@@ -483,10 +519,10 @@ mod test {
         );
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-//        assert_eq!(
-//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-//            tx_ref
-//        );
+        //        assert_eq!(
+        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+        //            tx_ref
+        //        );
     }
     #[test]
     fn test6() {
@@ -514,10 +550,10 @@ mod test {
         );
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-//        assert_eq!(
-//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-//            tx_ref
-//        );
+        //        assert_eq!(
+        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+        //            tx_ref
+        //        );
     }
 
     #[test]
@@ -545,10 +581,10 @@ mod test {
         );
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-//        assert_eq!(
-//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-//            tx_ref
-//        );
+        //        assert_eq!(
+        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+        //            tx_ref
+        //        );
     }
     #[test]
     fn test9() {
@@ -576,10 +612,10 @@ mod test {
         //            assert_eq!(pay_request.minFinalCltvExpiry, Some(12));
         assert_eq!(pay_request.tags.len(), 4);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-//        assert_eq!(
-//            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-//            tx_ref
-//        );
+        //        assert_eq!(
+        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+        //            tx_ref
+        //        );
     }
 
 }
