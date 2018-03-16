@@ -333,9 +333,7 @@ mod tests {
         for p in pairs {
             let (s, expected_error) = p;
             let dec_result = Bech32::from_string(s.to_string());
-            println!("{:?}", s.to_string());
             if dec_result.is_ok() {
-                println!("{:?}", dec_result.unwrap());
                 panic!("Should be invalid: {:?}", s);
             }
             assert_eq!(dec_result.unwrap_err(), expected_error);
