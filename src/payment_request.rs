@@ -46,14 +46,14 @@ impl PaymentRequest {
             )),
             len => {
                 let (recovery_id, signature) = {
-                    let signature_bytes = data.split_off(len - 104).to_u8_vec(true)?;
-                    // last byte of the signature
-                    let recovery_id = secp256k1::RecoveryId::parse(signature_bytes[65 - 1])?;
-                    let signature = PaymentRequest::parse_signature(&signature_bytes[..65 - 1]);
+                    let signature_bytes = data.split_off(len - 104).to_u8_vec(false)?;
+                    //  the recovery id is the last byte of the signature
+                    let recovery_id = secp256k1::RecoveryId::parse(signature_bytes[64])?;
+                    let signature = PaymentRequest::parse_signature(&signature_bytes[..64]);
                     (recovery_id, signature)
                 };
 
-                let message = PaymentRequest::parse_message(&hrp, &data.to_u8_vec(false)?);
+                let message = PaymentRequest::parse_message(&hrp, &data.to_u8_vec(true)?);
                 let timestamp = Timestamp::decode(&data.drain(..7).collect::<Vec<_>>());
                 let tags = Tag::parse_all(&data)?;
 
@@ -61,7 +61,6 @@ impl PaymentRequest {
 
                 let prefix = hrp[..4].to_owned();
                 let amount = hrp.get(4..).and_then(|u| Amount::decode(u).ok());
-                //                    .map(|u| u as u64);
                 let valid_signature = secp256k1::verify(&message, &signature, &node_id);
                 if valid_signature {
                     Ok(PaymentRequest {
@@ -86,7 +85,6 @@ impl PaymentRequest {
         let hr_amount = self.amount.map_or(String::new(), |a| Amount::encode(a));
         let mut hrp = self.prefix.to_owned() + &hr_amount;
         let stream = [
-            //            self.stream()?.to_u5_vec(true)?,
             self.stream(),
             self.signature.serialize().to_vec().to_u5_vec(true)?,
             vec![self.recovery_id],
@@ -235,8 +233,6 @@ impl PaymentRequest {
     pub fn hash(&self) -> Result<Vec<u8>, Error> {
         let amount = self.amount.map_or(String::new(), |a| Amount::encode(a));
         let bytes = (self.prefix.to_owned() + &amount).as_bytes().to_vec();
-        //        self.stream()
-        //            .map(|s| PaymentRequest::sha256_hasher(&[bytes, s.to_u8_vec(false)].concat()).to_vec())
 
         Ok(
             PaymentRequest::sha256_hasher(&[bytes, self.stream().to_u8_vec(false)?].concat())
@@ -269,14 +265,14 @@ impl PaymentRequest {
     }
 
     // parse the message
-    fn parse_message(hrp: &String, bytes: &Vec<u8>) -> Message {
-        let message_bytes = [hrp.as_bytes(), bytes.as_slice()].concat();
+    fn parse_message(hrp: &String, bytes: &[u8]) -> Message {
+        let message_bytes = [hrp.as_bytes(), bytes].concat();
         let raw_message = PaymentRequest::sha256_hasher(&message_bytes);
 
         secp256k1::Message::parse(&raw_message)
     }
 
-    fn sha256_hasher(bytes: &Vec<u8>) -> [u8; 32] {
+    fn sha256_hasher(bytes: &[u8]) -> [u8; 32] {
         let mut hash = [0u8; 32];
         let mut hasher = Sha256::new();
         hasher.input(bytes);
@@ -362,6 +358,7 @@ mod test {
         assert!(pay_request.amount.is_none());
         assert_eq!(pay_request.payment_hash().unwrap(), payment_hash);
         assert_eq!(pay_request.timestamp, 1496_314_658u64);
+        assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
             pay_request.description().unwrap().to_string(),
             "Please consider supporting this project".to_owned()
@@ -389,7 +386,7 @@ mod test {
         assert_eq!(pay_request.amount, Some(250_000_000u64));
         assert_eq!(pay_request.payment_hash().unwrap(), payment_hash);
         assert_eq!(pay_request.timestamp, 1496314658u64);
-        //        //        assert_eq!(pr.nodeId, PublicKey(BinaryData("03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad")));
+        assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
             pay_request.description().unwrap().to_string(),
             "1 cup coffee".to_owned()
@@ -397,10 +394,10 @@ mod test {
         assert_eq!(pay_request.fallback_address(), None);
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-        //        assert_eq!(
-        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-        //            tx_ref
-        //        );
+        assert_eq!(
+            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+            tx_ref
+        );
     }
 
     #[test]
@@ -419,7 +416,7 @@ mod test {
         assert_eq!(pay_request.amount, Some(2000_000_000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
-        //        assert_eq!(pay_request.nodeId, PublicKey(BinaryData("03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad")));
+        assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
             pay_request.description().unwrap().to_string(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
@@ -427,10 +424,10 @@ mod test {
         assert_eq!(pay_request.fallback_address(), None);
         assert_eq!(pay_request.tags.len(), 2);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-        //        assert_eq!(
-        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-        //            tx_ref
-        //        );
+        assert_eq!(
+            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+            tx_ref
+        );
     }
     #[test]
     fn test3() {
@@ -446,7 +443,7 @@ mod test {
         assert_eq!(pay_request.amount, Some(2000_000_000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
-        //        //            assert_eq!(pr.nodeId, PublicKey(BinaryData("03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad")));
+        assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
             pay_request.description().unwrap().to_string(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
@@ -457,10 +454,10 @@ mod test {
         );
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-        //        assert_eq!(
-        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-        //            tx_ref
-        //        );
+        assert_eq!(
+            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+            tx_ref
+        );
     }
     #[test]
     fn test4() {
@@ -503,7 +500,7 @@ mod test {
         assert_eq!(pay_request.amount, Some(2000_000_000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
-        //            assert_eq!(pay_request.nodeId, PublicKey(BinaryData("03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad")));
+        assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
             pay_request.description().unwrap().to_string(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
@@ -520,10 +517,10 @@ mod test {
         );
         assert_eq!(pay_request.tags.len(), 4);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-        //        assert_eq!(
-        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-        //            tx_ref
-        //        );
+        assert_eq!(
+            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+            tx_ref
+        );
     }
 
     #[test]
@@ -541,7 +538,7 @@ mod test {
         assert_eq!(pay_request.amount, Some(2000000000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
-        //            assert_eq!(pay_request.nodeId, PublicKey(BinaryData("03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad")));
+        assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
             pay_request.description().unwrap().to_string(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
@@ -552,10 +549,10 @@ mod test {
         );
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-        //        assert_eq!(
-        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-        //            tx_ref
-        //        );
+        assert_eq!(
+            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+            tx_ref
+        );
     }
     #[test]
     fn test6() {
@@ -572,7 +569,7 @@ mod test {
         assert_eq!(pay_request.amount, Some(2000000000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
-        //            assert_eq!(pay_request.nodeId, PublicKey(BinaryData("03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad")));
+        assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
             pay_request.description().unwrap().to_string(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
@@ -583,10 +580,10 @@ mod test {
         );
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-        //        assert_eq!(
-        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-        //            tx_ref
-        //        );
+        assert_eq!(
+            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+            tx_ref
+        );
     }
 
     #[test]
@@ -603,7 +600,7 @@ mod test {
         assert_eq!(pay_request.amount, Some(2000000000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
-        //            assert_eq!(pay_request.nodeId, PublicKey(BinaryData("03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad")));
+        assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
             pay_request.description().unwrap().to_string(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
@@ -614,10 +611,10 @@ mod test {
         );
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-        //        assert_eq!(
-        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-        //            tx_ref
-        //        );
+        assert_eq!(
+            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+            tx_ref
+        );
     }
     #[test]
     fn test9() {
@@ -633,7 +630,7 @@ mod test {
         assert_eq!(pay_request.amount, Some(2000000000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
-        //            assert_eq!(pay_request.nodeId, PublicKey(BinaryData("03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad")));
+        assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
             pay_request.description().unwrap().to_string(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
@@ -645,10 +642,10 @@ mod test {
         assert_eq!(pay_request.min_final_cltv_expiry(), Some(12));
         assert_eq!(pay_request.tags.len(), 4);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-        //        assert_eq!(
-        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-        //            tx_ref
-        //        );
+        assert_eq!(
+            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+            tx_ref
+        );
     }
 
     #[test]
@@ -659,16 +656,11 @@ mod test {
         let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
-        println!(
-            "pay_request => {:?}",
-            to_hex(&pay_request.payment_hash().unwrap())
-        );
-
         assert_eq!(pay_request.prefix, "lnbc");
         assert_eq!(pay_request.amount, Some(250_000_000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
-        //            assert_eq!(pay_request.nodeId, PublicKey(BinaryData("03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad")));
+        assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
             pay_request.description().unwrap().to_string(),
             "ナンセンス 1杯".to_owned()
@@ -676,10 +668,10 @@ mod test {
         assert_eq!(pay_request.expiry(), Some(60));
         assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
-        //        assert_eq!(
-        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
-        //            tx_ref
-        //        );
+        assert_eq!(
+            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+            tx_ref
+        );
     }
 
 }
