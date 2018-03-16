@@ -137,6 +137,17 @@ impl PaymentRequest {
             .collect_vec()
     }
 
+    /// min final cltv expiry
+    pub fn min_final_cltv_expiry(&self) -> Option<u64> {
+        self.tags
+            .iter()
+            .filter_map(|v| match *v {
+                Tag::MinFinalCltvExpiry { blocks } => Some(blocks),
+                _ => None,
+            })
+            .next()
+    }
+
     /// the fallback address if any. It could be a script address, pubkey address, ..
     pub fn fallback_address(&self) -> Option<String> {
         // encode fallback address
@@ -609,7 +620,7 @@ mod test {
             pay_request.fallback_address(),
             Some("bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3".to_owned())
         );
-        //            assert_eq!(pay_request.minFinalCltvExpiry, Some(12));
+        assert_eq!(pay_request.min_final_cltv_expiry(), Some(12));
         assert_eq!(pay_request.tags.len(), 4);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
         //        assert_eq!(
