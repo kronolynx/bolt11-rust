@@ -130,7 +130,7 @@ impl PaymentRequest {
         self.tags
             .iter()
             .filter_map(|v| match *v {
-                Tag::RoutingInfo { ref path } => Some(path.clone()),
+                Tag::RoutingInfo { ref path } => Some(path.to_owned()),
                 _ => None,
             })
             .flatten()
@@ -143,6 +143,28 @@ impl PaymentRequest {
             .iter()
             .filter_map(|v| match *v {
                 Tag::MinFinalCltvExpiry { blocks } => Some(blocks),
+                _ => None,
+            })
+            .next()
+    }
+
+    /// expiry
+    pub fn expiry(&self) -> Option<u64> {
+        self.tags
+            .iter()
+            .filter_map(|v| match *v {
+                Tag::Expiry { seconds } => Some(seconds),
+                _ => None,
+            })
+            .next()
+    }
+
+    /// description hash
+    pub fn description_hash(&self) -> Option<Vec<u8>> {
+        self.tags
+            .iter()
+            .filter_map(|v| match *v {
+                Tag::DescriptionHash { ref hash } => Some(hash.to_owned()),
                 _ => None,
             })
             .next()
@@ -622,6 +644,37 @@ mod test {
         );
         assert_eq!(pay_request.min_final_cltv_expiry(), Some(12));
         assert_eq!(pay_request.tags.len(), 4);
+        assert_eq!(pay_request.encode().unwrap(), tx_ref);
+        //        assert_eq!(
+        //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
+        //            tx_ref
+        //        );
+    }
+
+    #[test]
+    fn test10() {
+        let tx_ref = "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqyp\
+        qdpquwpc4curk03c9wlrswe78q4eyqc7d8d0xqzpuyk0sg5g70me25alkluzd2x62aysf2pyy8edtjeevuv4p2d5p7\
+        6r4zkmneet7uvyakky2zr4cusd45tftc9c5fh0nnqpnl2jfll544esqchsrny";
+        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
+        let payment_hash =
+            from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+        println!(
+            "pay_request => {:?}",
+            to_hex(&pay_request.payment_hash().unwrap())
+        );
+
+        assert_eq!(pay_request.prefix, "lnbc");
+        assert_eq!(pay_request.amount, Some(250_000_000u64));
+        assert_eq!(pay_request.payment_hash(), Some(payment_hash));
+        assert_eq!(pay_request.timestamp, 1496314658u64);
+        //            assert_eq!(pay_request.nodeId, PublicKey(BinaryData("03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad")));
+        assert_eq!(
+            pay_request.description().unwrap().to_string(),
+            "ナンセンス 1杯".to_owned()
+        );
+        assert_eq!(pay_request.expiry(), Some(60));
+        assert_eq!(pay_request.tags.len(), 3);
         assert_eq!(pay_request.encode().unwrap(), tx_ref);
         //        assert_eq!(
         //            pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
