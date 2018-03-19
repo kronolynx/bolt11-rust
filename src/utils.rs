@@ -35,11 +35,7 @@ fn split_n(s: &str, n: usize) -> Vec<&str> {
 }
 
 /// Convert between bit sizes
-///
-/// # Panics
-/// Function will panic if attempting to convert `from` or `to` a bit size that
-/// is larger than 8 bits.
-pub fn convert_bits(data: &Vec<u8>, from: u32, to: u32, pad: bool) -> ConvertResult {
+pub fn convert_bits(data: &[u8], from: u32, to: u32, pad: bool) -> ConvertResult {
     if from > 8 || to > 8 {
         return Err(Error::InvalidParameter(
             "convert_bits `from` and `to` parameters greater than 8".to_owned(),
@@ -68,28 +64,6 @@ pub fn convert_bits(data: &Vec<u8>, from: u32, to: u32, pad: bool) -> ConvertRes
         }
     }
     Ok(ret)
-}
-
-/// Convert between bit sizes
-///
-/// # Panics
-/// Function will panic if attempting to convert `from` or `to` a bit size that
-/// is larger than 8 bits.
-pub fn convert(data: &[u8], in_bits: u64, out_bits: u64) -> ConvertResult {
-    let mut value = 0u64;
-    let mut bits = 0u64;
-    let max_v = (1 << out_bits) - 1;
-    let mut result = Vec::<u8>::new();
-    for v in data {
-        value = (value << in_bits) | *v as u64;
-        bits += in_bits;
-
-        while bits >= out_bits {
-            bits -= out_bits;
-            result.push(((value >> bits) & max_v) as u8);
-        }
-    }
-    Ok(result)
 }
 
 #[cfg(test)]

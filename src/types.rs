@@ -4,7 +4,6 @@ use num::bigint::BigUint;
 use std::{error, fmt};
 use std::io;
 use utils::convert_bits;
-use utils::convert;
 use std::num;
 use std::string;
 use bech32;
