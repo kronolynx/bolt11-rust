@@ -15,7 +15,7 @@ use bitcoin_bech32::constants::Network;
 
 /// Lightning Payment Request
 /// * see https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentRequest {
     /// currency prefix; lnbc for bitcoin, lntb for bitcoin testnet
     pub prefix: String,
@@ -35,7 +35,14 @@ pub struct PaymentRequest {
     message: Message,
 }
 
+//impl Default for PaymentRequest {
+//
+//}
+
 impl PaymentRequest {
+
+    /// decode parses the provided encoded invoice and returns a decoded Invoice if
+    /// it is valid by BOLT11 and matches the provided active network.
     pub fn decode(input: &str) -> Result<PaymentRequest, Error> {
         let Bech32 { hrp, mut data } = Bech32::from_string(input.to_owned())?;
 
@@ -101,6 +108,16 @@ impl PaymentRequest {
         Ok(hrp)
     }
 
+    /// update payment amoount
+    pub fn update_amount(&mut self, amount: Option<u64>) {
+        self.amount = amount;
+    }
+
+    /// update public key of the payee node
+    pub fn update_node_id(&mut self, node_id: PublicKey) {
+        self.node_id = node_id;
+    }
+
     /// the payment hash
     pub fn payment_hash(&self) -> Option<Vec<u8>> {
         self.tags
@@ -123,6 +140,14 @@ impl PaymentRequest {
             .next()
     }
 
+    /// update the payment description
+    /// *Note*: must be used if and only if description hash is not used.
+    pub fn update_description(&mut self, description: String) {
+        let mut tags = self.filter_description();
+        tags.push(Tag::Description { description });
+        self.tags = tags
+    }
+
     /// extra rounting info
     pub fn routing_info(&self) -> Vec<ExtraHop> {
         self.tags
@@ -136,6 +161,8 @@ impl PaymentRequest {
     }
 
     /// min final cltv expiry
+    /// optional value which allows the receiver of the payment to specify the delta between the
+    /// current height and the HTLC extended to the receiver.
     pub fn min_final_cltv_expiry(&self) -> Option<u64> {
         self.tags
             .iter()
@@ -144,6 +171,16 @@ impl PaymentRequest {
                 _ => None,
             })
             .next()
+    }
+    /// update min final cltv expiry
+    pub fn update_min_final_cltv_expiry(&mut self, blocks: u64) {
+        let mut tags = self.tags
+            .iter()
+            .filter(|t| !matches!(*t, &Tag::MinFinalCltvExpiry{..}))
+            .map(|t| t.to_owned())
+            .collect::<Vec<Tag>>();
+        tags.push(Tag::MinFinalCltvExpiry { blocks });
+        self.tags = tags;
     }
 
     /// expiry
@@ -157,6 +194,16 @@ impl PaymentRequest {
             .next()
     }
 
+    /// update expiry
+    pub fn update_expiry(&mut self, seconds: u64) {
+        let mut tags = self.tags
+            .iter()
+            .filter(|t| !matches!(*t, &Tag::Expiry{..}))
+            .map(|t| t.to_owned())
+            .collect::<Vec<Tag>>();
+        tags.push(Tag::Expiry { seconds });
+        self.tags = tags;
+    }
     /// description hash
     pub fn description_hash(&self) -> Option<Vec<u8>> {
         self.tags
@@ -166,6 +213,14 @@ impl PaymentRequest {
                 _ => None,
             })
             .next()
+    }
+
+    // update the payment description hash
+    // Note: must be used if and only if description is not used.
+    pub fn update_description_hash(&mut self, hash: Vec<u8>) {
+        let mut tags = self.filter_description();
+        tags.push(Tag::DescriptionHash { hash });
+        self.tags = tags;
     }
 
     /// the fallback address if any. It could be a script address, pubkey address, ..
@@ -229,6 +284,17 @@ impl PaymentRequest {
         self.tags.iter().filter_map(fallback).next()
     }
 
+    /// update fallback address
+    pub fn update_fallback_address(&mut self, version: u8, hash: Vec<u8>) {
+        let mut tags = self.tags
+            .iter()
+            .filter(|t| !matches!(*t, &Tag::FallbackAddress{..}))
+            .map(|t| t.to_owned())
+            .collect::<Vec<Tag>>();
+        tags.push(Tag::FallbackAddress { version, hash });
+        self.tags = tags
+    }
+
     /// the hash of this payment request
     pub fn hash(&self) -> Result<Vec<u8>, Error> {
         let amount = self.amount.map_or(String::new(), |a| Amount::encode(a));
@@ -262,6 +328,16 @@ impl PaymentRequest {
             .collect_vec()
             .concat();
         [Timestamp::encode(self.timestamp), bytes].concat()
+    }
+    // remove the payment description
+    fn filter_description(&self) -> Vec<Tag> {
+        self.tags
+            .iter()
+            .filter(|t| {
+                !matches!(*t, &Tag::Description{..}) && !matches!(*t, &Tag::DescriptionHash{..} )
+            })
+            .map(|t| t.to_owned())
+            .collect::<Vec<Tag>>()
     }
 
     // parse the message
@@ -343,7 +419,30 @@ mod test {
     }
 
     #[test]
-    fn test0() {
+    fn test_field_update() {
+        let tx_ref = "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqd\
+        q5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w\
+        3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp";
+        let mut pay_request = PaymentRequest::decode(&tx_ref).unwrap();
+
+        let amount = Some(850_000_000u64);
+        pay_request.update_amount(amount);
+        assert_eq!(pay_request.amount, amount);
+
+        let description = "ナンセンス 1杯";
+        pay_request.update_description(description.to_owned());
+        assert_eq!(pay_request.description().unwrap().to_string(), description);
+
+        let fallback_address = Some("1RustyRX2oai4EYYDpQGWvEL62BBGqN9T".to_owned());
+        let fallback_hash = vec![
+            4, 182, 31, 125, 193, 234, 13, 201, 148, 36, 70, 76, 196, 6, 77, 197, 100, 217, 30, 137
+        ];
+        pay_request.update_fallback_address(17, fallback_hash);
+        assert_eq!(pay_request.fallback_address(), fallback_address)
+    }
+
+    #[test]
+    fn test_send_using_payment_hash() {
         // Please make a donation of any amount using payment_hash 0001020304050607080900010203040506070809000102030405060708090102 to me @03e7156ae33b0a208d0744199163177e909e80176e55d97a2f221ede0f934dd9ad
         let tx_ref = "lnbc1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2p\
         kx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq8rkx3yf5tcsyz3d73gafnh3cax9r\
@@ -370,10 +469,14 @@ mod test {
             pay_request.sign(&SEC_KEY).unwrap().encode().unwrap(),
             tx_ref
         );
+        assert_eq!(
+            PaymentRequest::decode(&pay_request.encode().unwrap()).unwrap(),
+            pay_request
+        );
     }
 
     #[test]
-    fn test1() {
+    fn test_send_to_the_same_peer_within_1_minute() {
         // Please send $3 for a cup of coffee to the same peer, within 1 minute
         let tx_ref = "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqd\
         q5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w\
@@ -401,7 +504,7 @@ mod test {
     }
 
     #[test]
-    fn test2() {
+    fn test_send_for_an_entire_list_of_things_hashed() {
         // Now send $24 for an entire list of things (hashed)
         let tx_ref =
             "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqh\
@@ -430,7 +533,7 @@ mod test {
         );
     }
     #[test]
-    fn test3() {
+    fn test_send_for_an_entire_list_of_things_hashed_on_testnet_with_fallback_address() {
         // The same, on testnet, with a fallback address mk2QpYatsKicvFVuTAQLBryyccRXMUaGHP
         let tx_ref = "lntb20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58y\
             jmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfpp3x9et2e20v6pu37c5d9vax37wxq72un98k6\
@@ -460,7 +563,7 @@ mod test {
         );
     }
     #[test]
-    fn test4() {
+    fn test_on_mainnet_with_fallback_address_with_extra_routing_info_via_nodes() {
         // On mainnet, with fallback address 1RustyRX2oai4EYYDpQGWvEL62BBGqN9T with extra routing
         // info to go via nodes 029e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255
         // then 039e03a901b85534ff1e92c43c74431f7ce72046060fcf7a95c37e148f78c77255"
@@ -524,7 +627,7 @@ mod test {
     }
 
     #[test]
-    fn test5() {
+    fn test_on_mainnet_with_fallback_address_p2sh() {
         // On mainnet, with fallback (p2sh) address 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
         let tx_ref = "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp5\
                 8yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfppj3a24vwu6r8ejrss3axul8rxldph2q7z9kk\
@@ -555,7 +658,7 @@ mod test {
         );
     }
     #[test]
-    fn test6() {
+    fn test_on_mainnet_with_fallback_p2wpkh_address() {
         // On mainnet, with Fallback (p2wpkh) address bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4
         let tx_ref = "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58\
                 yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfppqw508d6qejxtdg4y5r3zarvary0c5xw7kknt\
@@ -587,7 +690,7 @@ mod test {
     }
 
     #[test]
-    fn test7() {
+    fn test_on_mainnet_with_fallback_address_p2wsh() {
         //  On mainnet, with __fallback (p2wsh) address bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3
         let tx_ref = "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqhp58y\
             jmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfp4qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4x\
@@ -617,7 +720,7 @@ mod test {
         );
     }
     #[test]
-    fn test9() {
+    fn test_on_mainnet_with_fallback_address_p2wsh_and_minimum_htlc_cltv_expiry() {
         //  On mainnet, with _Fallback (p2wsh) address bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3 and a minimum htlc cltv expiry of 12
         let tx_ref = "lnbc20m1pvjluezcqpvpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqh\
             p58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfp4qrp33g0q5c5txsp9arysrx4k6zdkfs4nc\
@@ -649,7 +752,8 @@ mod test {
     }
 
     #[test]
-    fn test10() {
+    fn test_send_for_cup_of_nonsense_to_the_same_peer() {
+        //Please send 0.0025 BTC for a cup of nonsense (ナンセンス 1杯) to the same peer, within 1 minute
         let tx_ref = "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqyp\
         qdpquwpc4curk03c9wlrswe78q4eyqc7d8d0xqzpuyk0sg5g70me25alkluzd2x62aysf2pyy8edtjeevuv4p2d5p7\
         6r4zkmneet7uvyakky2zr4cusd45tftc9c5fh0nnqpnl2jfll544esqchsrny";
