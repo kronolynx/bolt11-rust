@@ -55,6 +55,7 @@ pub enum Tag {
     },
 
     /// Min final CLTV expiry
+    /// specifies the delta between the current height and the HLTC extended to the receiver.
     MinFinalCltvExpiry {
         /// `blocks` min final cltv expiry, in blocks
         blocks: u64,
