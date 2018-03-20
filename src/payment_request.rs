@@ -3,7 +3,7 @@ use tag::{ExtraHop, Tag};
 use timestamp::Timestamp;
 use types::{Error, U5, U5Conversions, U8Conversions};
 use secp256k1;
-use secp256k1::{Message, PublicKey, SecretKey, Signature};
+use secp256k1::{Message, PublicKey, RecoveryId, SecretKey, Signature};
 use crypto::sha2::Sha256;
 use crypto::digest::Digest;
 use amount::Amount;
@@ -28,16 +28,8 @@ pub struct PaymentRequest {
     /// payment tags; must include a single PaymentHash tag
     pub tags: Vec<Tag>,
     /// request signature that will be checked against node id
-    pub signature: Signature,
-    // recovery id
-    recovery_id: u8,
-    // message
-    message: Message,
+    pub signature: Vec<u8>,
 }
-
-//impl Default for PaymentRequest {
-//
-//}
 
 impl PaymentRequest {
 
@@ -52,17 +44,14 @@ impl PaymentRequest {
                 "data is too short to decode".to_owned(),
             )),
             len => {
-                let (recovery_id, signature) = {
-                    let signature_bytes = data.split_off(len - 104).to_u8_vec(false)?;
-                    //  the recovery id is the last byte of the signature
-                    let recovery_id = secp256k1::RecoveryId::parse(signature_bytes[64])?;
-                    let signature = PaymentRequest::parse_signature(&signature_bytes[..64]);
-                    (recovery_id, signature)
-                };
+                let signature_bytes = data.split_off(len - 104).to_u8_vec(false)?;
 
                 let message = PaymentRequest::parse_message(&hrp, &data.to_u8_vec(true)?);
+
                 let timestamp = Timestamp::decode(&data.drain(..7).collect::<Vec<_>>());
                 let tags = Tag::parse_all(&data)?;
+
+                let (recovery_id, signature) = PaymentRequest::parse_signature(&signature_bytes)?;
 
                 let node_id = secp256k1::recover(&message, &signature, &recovery_id)?;
 
@@ -76,9 +65,7 @@ impl PaymentRequest {
                         timestamp,
                         node_id,
                         tags,
-                        signature,
-                        recovery_id: recovery_id.serialize(),
-                        message,
+                        signature: signature_bytes,
                     })
                 } else {
                     Err(Error::SignatureError(secp256k1::Error::InvalidSignature))
@@ -91,11 +78,7 @@ impl PaymentRequest {
     pub fn encode(&self) -> Result<String, Error> {
         let hr_amount = self.amount.map_or(String::new(), |a| Amount::encode(a));
         let mut hrp = self.prefix.to_owned() + &hr_amount;
-        let stream = [
-            self.stream(),
-            self.signature.serialize().to_vec().to_u5_vec(true)?,
-            vec![self.recovery_id],
-        ].concat();
+        let stream = [self.stream(), self.signature.to_u5_vec(true)?].concat();
 
         let checksum = bech32_checksum(&hrp.as_bytes().to_vec(), &stream);
         let stream_sum = [stream, checksum]
@@ -308,11 +291,14 @@ impl PaymentRequest {
 
     /// sign a payment request
     pub fn sign(&self, secret_key: &SecretKey) -> Result<PaymentRequest, Error> {
-        match secp256k1::sign(&self.message, secret_key) {
+        let hrp = self.prefix.to_owned() + &self.amount.map(Amount::encode).unwrap_or_default();
+        let message = PaymentRequest::parse_message(&hrp, &self.stream().to_u8_vec(true)?);
+        match secp256k1::sign(&message, secret_key) {
             Ok((signature, recovery_id)) => {
                 let mut signed = self.clone();
-                signed.signature = signature;
-                signed.recovery_id = recovery_id.serialize();
+                let mut bytes = signature.serialize().to_vec();
+                bytes.push(recovery_id.serialize());
+                signed.signature = bytes;
                 Ok(signed)
             }
             Err(e) => Err(Error::SignatureError(e)),
@@ -356,17 +342,25 @@ impl PaymentRequest {
         hash
     }
 
-    // parse the signature
-    fn parse_signature(bytes: &[u8]) -> Signature {
-        let sig_raw = bytes
-            .iter()
-            .enumerate()
-            .fold([0u8; 64], |mut acc, (index, item)| {
-                acc[index] = *item;
-                acc
-            });
-
-        secp256k1::Signature::parse(&sig_raw)
+    // parse the signature, the signature must be 65 bytes
+    fn parse_signature(bytes: &[u8]) -> Result<(RecoveryId, Signature), Error> {
+        if bytes.len() == 65 {
+            //  the recovery id is the last byte of the signature
+            let recovery_id = secp256k1::RecoveryId::parse(bytes[64])?;
+            let sig_raw = bytes[..64].iter().enumerate().fold(
+                [0u8; 64],
+                |mut acc, (index, item)| {
+                    acc[index] = *item;
+                    acc
+                },
+            );
+            let signature = secp256k1::Signature::parse(&sig_raw);
+            Ok((recovery_id, signature))
+        } else {
+            Err(Error::InvalidLength(
+                "the lenght must be 65 bytes".to_owned(),
+            ))
+        }
     }
 }
 
