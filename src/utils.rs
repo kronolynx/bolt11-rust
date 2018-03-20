@@ -3,7 +3,6 @@
 use std::fmt::Write;
 use std::num;
 use types::{ConvertResult, Error};
-use std::ops::Range;
 
 /// convert vec u8 to hex-string
 pub fn to_hex(bytes: &[u8]) -> String {
