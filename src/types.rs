@@ -123,6 +123,8 @@ pub enum Error {
     InvalidParameter(String),
     /// Input value exceeds "from bits" size
     InvalidInputValue(u8),
+    /// Invalid value
+    InvalidValue(String),
     /// Invalid padding values in data
     InvalidPadding,
     /// Invalid input length
@@ -145,7 +147,8 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Error::InvalidParameter(ref e) => write!(f, "{}", e),
-            Error::InvalidInputValue(b) => write!(f, "invalid input value ({})", b),
+            Error::InvalidInputValue(e) => write!(f, "invalid input value ({})", e),
+            Error::InvalidValue(ref e) => write!(f, "{}", e),
             Error::InvalidPadding => write!(f, "invalid padding"),
             Error::InvalidLength(ref e) => write!(f, "{}", e),
             Error::IOErr(ref e) => write!(f, "{}", e),
@@ -163,6 +166,7 @@ impl error::Error for Error {
         match *self {
             Error::InvalidParameter(ref e) => e,
             Error::InvalidInputValue(_) => "invalid input value",
+            Error::InvalidValue(ref e) => e,
             Error::InvalidPadding => "invalid padding",
             Error::InvalidLength(ref e) => e,
             Error::IOErr(ref e) => error::Error::description(e),
