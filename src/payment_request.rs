@@ -12,12 +12,14 @@ use base58check::*;
 use itertools::Itertools;
 use bitcoin_bech32::WitnessProgram;
 use bitcoin_bech32::constants::Network;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Lightning Payment Request
 /// * see https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentRequest {
-    /// currency prefix; lnbc for bitcoin, lntb for bitcoin testnet
+    /// specifies what network this Lightning payment request is meant for.
+    /// lnbc for bitcoin, lntb for bitcoin testnet
     pub prefix: String,
     /// amount to pay in millisatoshis (empty string means no amount is specified)
     pub amount: Option<u64>,
@@ -32,6 +34,57 @@ pub struct PaymentRequest {
 }
 
 impl PaymentRequest {
+    /// create a new PaymentRequest
+    pub fn new(
+        prefix: String,
+        amount: Option<u64>,
+        payment_hash: Vec<u8>,
+        secret_key: &SecretKey,
+        description: String,
+        fallback_address: Option<String>,
+        expiry_seconds: Option<u64>,
+        extra_hops: Vec<ExtraHop>,
+        timestamp: Option<u64>,
+        min_final_cltv_expiry: Option<u64>,
+    ) -> Result<PaymentRequest, Error> {
+        let mut tags = vec![
+            Tag::PaymentHash { hash: payment_hash },
+            Tag::Description { description },
+        ];
+        if let Some(seconds) = expiry_seconds {
+            tags.push(Tag::Expiry { seconds })
+        }
+        if extra_hops.len() > 0 {
+            tags.push(Tag::RoutingInfo { path: extra_hops })
+        }
+
+        if let Some(tag) = fallback_address.and_then(PaymentRequest::tag_from_fallback_address) {
+            tags.push(tag)
+        }
+
+        let time = timestamp.unwrap_or({
+            let start = SystemTime::now();
+            // TODO return ok or error
+            let time = start
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| Error::InvalidValue("invalid system time".to_owned()))?;
+            time.as_secs() * 1000 + time.subsec_nanos() as u64 / 1_000_000
+        });
+
+        if let Some(blocks) = min_final_cltv_expiry {
+            tags.push(Tag::MinFinalCltvExpiry { blocks })
+        }
+
+        let pay = PaymentRequest {
+            prefix: prefix,
+            amount,
+            timestamp: time,
+            node_id: secp256k1::PublicKey::from_secret_key(&secret_key),
+            tags,
+            signature: Vec::new(),
+        };
+        pay.sign(&secret_key)
+    }
 
     /// decode parses the provided encoded invoice and returns a decoded Invoice if
     /// it is valid by BOLT11 and matches the provided active network.
@@ -360,6 +413,24 @@ impl PaymentRequest {
             Err(Error::InvalidLength(
                 "the lenght must be 65 bytes".to_owned(),
             ))
+        }
+    }
+
+    // get tag from fallback adress
+    fn tag_from_fallback_address(address: String) -> Option<Tag> {
+        match address.from_base58check() {
+            Ok((version, hash)) => match version {
+                0 | 111 => Some(Tag::FallbackAddress { version: 17, hash }),
+                5 | 196 => Some(Tag::FallbackAddress { version: 18, hash }),
+                _ => None,
+            },
+            _ => match WitnessProgram::from_address(address.to_owned()) {
+                Ok(witness) => Some(Tag::FallbackAddress {
+                    version: witness.version,
+                    hash: witness.program,
+                }),
+                _ => None,
+            },
         }
     }
 }
@@ -772,4 +843,49 @@ mod test {
         );
     }
 
+    #[test]
+    fn test_new_payment() {
+        let tx_ref = "lnbc1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2p\
+        kx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq8rkx3yf5tcsyz3d73gafnh3cax9r\
+        n449d9p5uxz9ezhhypd0elx87sjle52x86fux2ypatgddc6k63n7erqz25le42c4u4ecky03ylcqca784w";
+        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
+
+        let new_pay_request = PaymentRequest::new(
+            pay_request.prefix.clone(),
+            pay_request.amount.clone(),
+            pay_request.payment_hash().unwrap(),
+            &SEC_KEY,
+            pay_request.description().unwrap().to_string(),
+            pay_request.fallback_address(),
+            pay_request.expiry(),
+            pay_request.routing_info(),
+            Some(pay_request.timestamp.clone()),
+            pay_request.min_final_cltv_expiry(),
+        ).unwrap();
+
+        assert_eq!(pay_request, new_pay_request);
+    }
+
+    #[test]
+    fn test_new_payment_with_amount() {
+        let tx_ref = "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqd\
+        q5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w\
+        3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp";
+        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
+
+        let new_pay_request = PaymentRequest::new(
+            pay_request.prefix.clone(),
+            pay_request.amount.clone(),
+            pay_request.payment_hash().unwrap(),
+            &SEC_KEY,
+            pay_request.description().unwrap().to_string(),
+            pay_request.fallback_address(),
+            pay_request.expiry(),
+            pay_request.routing_info(),
+            Some(pay_request.timestamp.clone()),
+            pay_request.min_final_cltv_expiry(),
+        ).unwrap();
+
+        assert_eq!(pay_request, new_pay_request);
+    }
 }
