@@ -1,7 +1,11 @@
 [package]
-name = "lightning_payencode"
+name = "bolt11"
 version = "0.1.0"
 authors = ["Johann Ortiz <johann@stampery.com>"]
+license = "MIT"
+readme = "README.md"
+keywords = ["bolt11"]
+repository = "https://github.com/kronolynx/bolt11-rust"
 
 [dependencies]
 num = "0.1.41"
