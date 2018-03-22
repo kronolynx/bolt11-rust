@@ -4,8 +4,9 @@ version = "0.1.0"
 authors = ["Johann Ortiz <johann@stampery.com>"]
 license = "MIT"
 readme = "README.md"
-keywords = ["bolt11"]
+keywords = ["bolt11", "bitcoin", "lightning", "invoice", "payment"]
 repository = "https://github.com/kronolynx/bolt11-rust"
+description = "Lightning Network BOLT11 Implementation (Payment Requests)"
 
 [dependencies]
 num = "0.1.41"
