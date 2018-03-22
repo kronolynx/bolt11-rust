@@ -1,7 +1,10 @@
+//! Represents a decoded or to be encoded payment request
+
 use bech32::{Bech32, create_checksum as bech32_checksum, CHARSET};
 use tag::{ExtraHop, Tag};
 use timestamp::Timestamp;
-use types::{Error, U5, U5Conversions, U8Conversions};
+use types::Error;
+use utils::{U5, U5Conversions, U8Conversions};
 use secp256k1;
 use secp256k1::{Message, PublicKey, RecoveryId, SecretKey, Signature};
 use crypto::sha2::Sha256;
@@ -15,79 +18,44 @@ use bitcoin_bech32::constants::Network;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Lightning Payment Request
-/// * see https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md
+/// *see* [Lightning RFC](https://github.com/lightningnetwork/lightning-rfc/blob/master/11-payment-encoding.md)
+///
+/// Represents a decoded or to be encoded payment request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaymentRequest {
-    /// specifies what network this Lightning payment request is meant for.
-    /// lnbc for bitcoin, lntb for bitcoin testnet
+    /// Specifies what network this Lightning payment request is meant for
+    /// lnbc for bitcoin, lntb for bitcoin testnet.
     pub prefix: String,
-    /// amount to pay in millisatoshis (empty string means no amount is specified)
+    /// Amount to pay in millisatoshis. Donation addresses often don't have an associated amount,
+    /// so amount is optional in that case.
     pub amount: Option<u64>,
-    /// request timestamp (UNIX format)
+    /// Request timestamp (UNIX format).
     pub timestamp: u64,
-    /// id of the node emitting the payment request
+    /// Id of the node emitting the payment request.
     pub node_id: PublicKey,
-    /// payment tags; must include a single PaymentHash tag
+    /// Payment tags; must include a single PaymentHash tag.
     pub tags: Vec<Tag>,
-    /// request signature that will be checked against node id
+    /// Request signature that will be checked against node id.
     pub signature: Vec<u8>,
 }
 
 impl PaymentRequest {
-    /// create a new PaymentRequest
-    pub fn new(
-        prefix: String,
-        amount: Option<u64>,
-        payment_hash: Vec<u8>,
-        secret_key: &SecretKey,
-        description: String,
-        fallback_address: Option<String>,
-        expiry_seconds: Option<u64>,
-        extra_hops: Vec<ExtraHop>,
-        timestamp: Option<u64>,
-        min_final_cltv_expiry: Option<u64>,
-    ) -> Result<PaymentRequest, Error> {
-        let mut tags = vec![
-            Tag::PaymentHash { hash: payment_hash },
-            Tag::Description { description },
-        ];
-        if let Some(seconds) = expiry_seconds {
-            tags.push(Tag::Expiry { seconds })
-        }
-        if extra_hops.len() > 0 {
-            tags.push(Tag::RoutingInfo { path: extra_hops })
-        }
-
-        if let Some(tag) = fallback_address.and_then(PaymentRequest::tag_from_fallback_address) {
-            tags.push(tag)
-        }
-
-        let time = timestamp.unwrap_or({
-            let start = SystemTime::now();
-            // TODO return ok or error
-            let time = start
-                .duration_since(UNIX_EPOCH)
-                .map_err(|_| Error::InvalidValue("invalid system time".to_owned()))?;
-            time.as_secs() * 1000 + time.subsec_nanos() as u64 / 1_000_000
-        });
-
-        if let Some(blocks) = min_final_cltv_expiry {
-            tags.push(Tag::MinFinalCltvExpiry { blocks })
-        }
-
-        let pay = PaymentRequest {
-            prefix: prefix,
-            amount,
-            timestamp: time,
-            node_id: secp256k1::PublicKey::from_secret_key(&secret_key),
-            tags,
-            signature: Vec::new(),
-        };
-        pay.sign(&secret_key)
-    }
-
-    /// decode parses the provided encoded invoice and returns a decoded Invoice if
+    /// Decode parses the provided encoded payment request and returns a decoded payment request if
     /// it is valid by BOLT11 and matches the provided active network.
+    ///
+    /// # Examples
+    /// ```
+    /// use bolt11::payment_request::PaymentRequest;
+    ///
+    /// let encoded_payment_request = "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqf
+    ///    qqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq
+    ///    27cqv3agm2awhz5se903vruatfhq77w3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp";
+    ///
+    /// let payment_request = PaymentRequest::decode(encoded_payment_request);
+    /// ```
+    /// # Params
+    /// `input` The encoded payment request.
+    ///
     pub fn decode(input: &str) -> Result<PaymentRequest, Error> {
         let Bech32 { hrp, mut data } = Bech32::from_string(input.to_owned())?;
 
@@ -127,7 +95,7 @@ impl PaymentRequest {
         }
     }
 
-    /// encode to bech32 payment request
+    /// Returns the encoded representation of a bech32 payment request.
     pub fn encode(&self) -> Result<String, Error> {
         let hr_amount = self.amount.map_or(String::new(), |a| Amount::encode(a));
         let mut hrp = self.prefix.to_owned() + &hr_amount;
@@ -144,17 +112,46 @@ impl PaymentRequest {
         Ok(hrp)
     }
 
-    /// update payment amoount
+    /// Return the hash of this payment request.
+    pub fn hash(&self) -> Result<Vec<u8>, Error> {
+        let amount = self.amount.map_or(String::new(), |a| Amount::encode(a));
+        let bytes = (self.prefix.to_owned() + &amount).as_bytes().to_vec();
+
+        Ok(
+            PaymentRequest::sha256_hasher(&[bytes, self.stream().to_u8_vec(false)?].concat())
+                .to_vec(),
+        )
+    }
+
+    /// Return a new PaymentRequest signed with the provided secret key.
+    /// # Params
+    /// `secret_key` The secret key used to sign the payment request.
+    pub fn sign(&self, secret_key: &SecretKey) -> Result<PaymentRequest, Error> {
+        let hrp = self.prefix.to_owned() + &self.amount.map(Amount::encode).unwrap_or_default();
+        let message = PaymentRequest::parse_message(&hrp, &self.stream().to_u8_vec(true)?);
+        match secp256k1::sign(&message, secret_key) {
+            Ok((signature, recovery_id)) => {
+                let mut signed = self.clone();
+                let mut bytes = signature.serialize().to_vec();
+                bytes.push(recovery_id.serialize());
+                signed.signature = bytes;
+                Ok(signed)
+            }
+            Err(e) => Err(Error::SignatureError(e)),
+        }
+    }
+
+    /// Update the payment amount.
     pub fn update_amount(&mut self, amount: Option<u64>) {
         self.amount = amount;
     }
 
-    /// update public key of the payee node
+    /// Update the public key of the payee node.
     pub fn update_node_id(&mut self, node_id: PublicKey) {
         self.node_id = node_id;
     }
 
-    /// the payment hash
+    /// Return the payment hash.
     pub fn payment_hash(&self) -> Option<Vec<u8>> {
         self.tags
             .iter()
@@ -165,26 +162,41 @@ impl PaymentRequest {
             .next()
     }
 
-    /// the description of the payment or its hash
-    pub fn description(&self) -> Option<Description> {
+    /// Return the description of the payment or its hash if any.
+    pub fn description(&self) -> Option<String> {
         self.tags
             .iter()
             .filter_map(|v| match *v {
-                Tag::Description { .. } | Tag::DescriptionHash { .. } => Description::new(v),
+                Tag::Description { .. } | Tag::DescriptionHash { .. } => {
+                    Description::new(v).map(|d| d.to_string())
+                }
                 _ => None,
             })
             .next()
     }
 
-    /// update the payment description
-    /// *Note*: must be used if and only if description hash is not used.
+    /// Update the payment description. <br>
+    /// *Note*: must be used if and only if description hash is not used (Replaces hash_description).
+    ///
+    /// # Params
+    /// `description` Free-format string that will be included in the payment request.
     pub fn update_description(&mut self, description: String) {
         let mut tags = self.filter_description();
         tags.push(Tag::Description { description });
         self.tags = tags
     }
 
-    /// extra rounting info
+    /// Update the payment description hash. <br>
+    /// *Note*: must be used if and only if description is not used (Replaces description).
+    /// # Params
+    /// `hash` 256-bit description of purpose of payment (SHA256).
+    pub fn update_description_hash(&mut self, hash: Vec<u8>) {
+        let mut tags = self.filter_description();
+        tags.push(Tag::DescriptionHash { hash });
+        self.tags = tags;
+    }
+
+    /// Return the extra routing info.
     pub fn routing_info(&self) -> Vec<ExtraHop> {
         self.tags
             .iter()
@@ -196,9 +208,7 @@ impl PaymentRequest {
             .collect_vec()
     }
 
-    /// min final cltv expiry
-    /// optional value which allows the receiver of the payment to specify the delta between the
-    /// current height and the HTLC extended to the receiver.
+    /// Return the min_final_cltv_expiry if any.
     pub fn min_final_cltv_expiry(&self) -> Option<u64> {
         self.tags
             .iter()
@@ -208,7 +218,10 @@ impl PaymentRequest {
             })
             .next()
     }
-    /// update min final cltv expiry
+
+    /// Update the min_final_cltv_expiry.
+    /// # Params
+    /// `blocks` Minimum CLTV expiry for incoming HTLC
     pub fn update_min_final_cltv_expiry(&mut self, blocks: u64) {
         let mut tags = self.tags
             .iter()
@@ -219,7 +232,7 @@ impl PaymentRequest {
         self.tags = tags;
     }
 
-    /// expiry
+    /// Return the payment request expiry if any.
     pub fn expiry(&self) -> Option<u64> {
         self.tags
             .iter()
@@ -230,7 +243,9 @@ impl PaymentRequest {
             .next()
     }
 
-    /// update expiry
+    /// Update the expiry data for this payment request.
+    /// # Arguments
+    /// `seconds` Expiry time in seconds.
     pub fn update_expiry(&mut self, seconds: u64) {
         let mut tags = self.tags
             .iter()
@@ -240,7 +255,8 @@ impl PaymentRequest {
         tags.push(Tag::Expiry { seconds });
         self.tags = tags;
     }
-    /// description hash
+
+    /// Return the description hash if any.
     pub fn description_hash(&self) -> Option<Vec<u8>> {
         self.tags
             .iter()
@@ -251,15 +267,7 @@ impl PaymentRequest {
             .next()
     }
 
-    // update the payment description hash
-    // Note: must be used if and only if description is not used.
-    pub fn update_description_hash(&mut self, hash: Vec<u8>) {
-        let mut tags = self.filter_description();
-        tags.push(Tag::DescriptionHash { hash });
-        self.tags = tags;
-    }
-
-    /// the fallback address if any. It could be a script address, pubkey address, ..
+    /// Return the fallback address if any. It could be a script address, pubkey address, ..
     pub fn fallback_address(&self) -> Option<String> {
         // encode fallback address
         fn bech_address(version: u8, program: Vec<u8>, network: Network) -> Option<String> {
@@ -320,7 +328,14 @@ impl PaymentRequest {
         self.tags.iter().filter_map(fallback).next()
     }
 
-    /// update fallback address
+    /// Update the fallback address.
+    ///
+    /// # Arguments
+    /// `version` the address version; valid values are: <br>
+    ///               - 17 (pubkey hash) <br>
+    ///               - 18 (script hash) <br>
+    ///               - 0 (segwit hash: p2wpkh (20 bytes) or p2wsh (32 bytes)) <br>
+    /// `hash` the address hash.
     pub fn update_fallback_address(&mut self, version: u8, hash: Vec<u8>) {
         let mut tags = self.tags
             .iter()
@@ -331,34 +346,71 @@ impl PaymentRequest {
         self.tags = tags
     }
 
-    /// the hash of this payment request
-    pub fn hash(&self) -> Result<Vec<u8>, Error> {
-        let amount = self.amount.map_or(String::new(), |a| Amount::encode(a));
-        let bytes = (self.prefix.to_owned() + &amount).as_bytes().to_vec();
-
-        Ok(
-            PaymentRequest::sha256_hasher(&[bytes, self.stream().to_u8_vec(false)?].concat())
-                .to_vec(),
-        )
-    }
-
-    /// sign a payment request
-    pub fn sign(&self, secret_key: &SecretKey) -> Result<PaymentRequest, Error> {
-        let hrp = self.prefix.to_owned() + &self.amount.map(Amount::encode).unwrap_or_default();
-        let message = PaymentRequest::parse_message(&hrp, &self.stream().to_u8_vec(true)?);
-        match secp256k1::sign(&message, secret_key) {
-            Ok((signature, recovery_id)) => {
-                let mut signed = self.clone();
-                let mut bytes = signature.serialize().to_vec();
-                bytes.push(recovery_id.serialize());
-                signed.signature = bytes;
-                Ok(signed)
-            }
-            Err(e) => Err(Error::SignatureError(e)),
+    /// Create a new PaymentRequest.
+    ///
+    /// # Arguments
+    /// `prefix` Network prefix.
+    /// `amount` Amount to pay.
+    /// `payment_hash` SHA256 payment hash.
+    /// `secret_key` Secret key.
+    /// `description` Short description of purpose of payment.
+    /// `fallback_address` Fallback on chain address.
+    /// `expiry_seconds` Expiry time of the payment request.
+    /// `extra_hops` Extra routing information.
+    /// `timestamp` Request timestamp.
+    /// `min_final_cltv_expiry` min_final_cltv_expiry.
+    pub fn new(
+        prefix: String,
+        amount: Option<u64>,
+        payment_hash: Vec<u8>,
+        secret_key: &SecretKey,
+        description: String,
+        fallback_address: Option<String>,
+        expiry_seconds: Option<u64>,
+        extra_hops: Vec<ExtraHop>,
+        timestamp: Option<u64>,
+        min_final_cltv_expiry: Option<u64>,
+    ) -> Result<PaymentRequest, Error> {
+        let mut tags = vec![
+            Tag::PaymentHash { hash: payment_hash },
+            Tag::Description { description },
+        ];
+        if let Some(seconds) = expiry_seconds {
+            tags.push(Tag::Expiry { seconds })
         }
+        if extra_hops.len() > 0 {
+            tags.push(Tag::RoutingInfo { path: extra_hops })
+        }
+
+        if let Some(tag) = fallback_address.and_then(PaymentRequest::tag_from_fallback_address) {
+            tags.push(tag)
+        }
+
+        let time = timestamp.unwrap_or({
+            let start = SystemTime::now();
+            let time = start
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| Error::InvalidValue("invalid system time".to_owned()))?;
+            time.as_secs() * 1000 + time.subsec_nanos() as u64 / 1_000_000
+        });
+
+        if let Some(blocks) = min_final_cltv_expiry {
+            tags.push(Tag::MinFinalCltvExpiry { blocks })
+        }
+
+        let pay = PaymentRequest {
+            prefix: prefix,
+            amount,
+            timestamp: time,
+            node_id: secp256k1::PublicKey::from_secret_key(&secret_key),
+            tags,
+            signature: Vec::new(),
+        };
+        pay.sign(&secret_key)
     }
 
-    /// a representation of this payment request, without its signature, as a bit stream. This is what will be signed
+    /// A representation of this payment request, without its signature, as a bit stream.
+    /// This is what will be signed
     fn stream(&self) -> Vec<U5> {
         //Result<Vec<u8>, Error> {
         let bytes = self.tags
@@ -368,7 +420,7 @@ impl PaymentRequest {
             .concat();
         [Timestamp::encode(self.timestamp), bytes].concat()
     }
-    // remove the payment description
+    /// Remove the payment description
     fn filter_description(&self) -> Vec<Tag> {
         self.tags
             .iter()
@@ -379,7 +431,7 @@ impl PaymentRequest {
             .collect::<Vec<Tag>>()
     }
 
-    // parse the message
+    /// Parse the message
     fn parse_message(hrp: &String, bytes: &[u8]) -> Message {
         let message_bytes = [hrp.as_bytes(), bytes].concat();
         let raw_message = PaymentRequest::sha256_hasher(&message_bytes);
@@ -387,6 +439,7 @@ impl PaymentRequest {
         secp256k1::Message::parse(&raw_message)
     }
 
+    /// Sha256 hasher
     fn sha256_hasher(bytes: &[u8]) -> [u8; 32] {
         let mut hash = [0u8; 32];
         let mut hasher = Sha256::new();
@@ -395,7 +448,7 @@ impl PaymentRequest {
         hash
     }
 
-    // parse the signature, the signature must be 65 bytes
+    /// Parse the signature, the signature must be 65 bytes
     fn parse_signature(bytes: &[u8]) -> Result<(RecoveryId, Signature), Error> {
         if bytes.len() == 65 {
             //  the recovery id is the last byte of the signature
@@ -411,7 +464,7 @@ impl PaymentRequest {
             Ok((recovery_id, signature))
         } else {
             Err(Error::InvalidLength(
-                "the lenght must be 65 bytes".to_owned(),
+                "the length must be 65 bytes".to_owned(),
             ))
         }
     }
@@ -436,7 +489,7 @@ impl PaymentRequest {
 }
 
 /// PaymentRequest description
-pub enum Description {
+enum Description {
     Tag(String),
     HashTag(Vec<u8>),
 }
@@ -488,7 +541,8 @@ mod test {
         let tx_ref = "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqd\
         q5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w\
         3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp";
-        let mut pay_request = PaymentRequest::decode(&tx_ref).unwrap();
+
+        let mut pay_request = PaymentRequest::decode(tx_ref).unwrap();
 
         let amount = Some(850_000_000u64);
         pay_request.update_amount(amount);
@@ -496,7 +550,7 @@ mod test {
 
         let description = "ナンセンス 1杯";
         pay_request.update_description(description.to_owned());
-        assert_eq!(pay_request.description().unwrap().to_string(), description);
+        assert_eq!(pay_request.description().unwrap(), description);
 
         let fallback_address = Some("1RustyRX2oai4EYYDpQGWvEL62BBGqN9T".to_owned());
         let fallback_hash = vec![
@@ -512,11 +566,10 @@ mod test {
         let tx_ref = "lnbc1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2p\
         kx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq8rkx3yf5tcsyz3d73gafnh3cax9r\
         n449d9p5uxz9ezhhypd0elx87sjle52x86fux2ypatgddc6k63n7erqz25le42c4u4ecky03ylcqca784w";
-
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
-
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
 
         assert_eq!(pay_request.prefix, "lnbc");
         assert!(pay_request.amount.is_none());
@@ -524,7 +577,7 @@ mod test {
         assert_eq!(pay_request.timestamp, 1496_314_658u64);
         assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
-            pay_request.description().unwrap().to_string(),
+            pay_request.description().unwrap(),
             "Please consider supporting this project".to_owned()
         );
         assert_eq!(pay_request.fallback_address(), None);
@@ -546,9 +599,10 @@ mod test {
         let tx_ref = "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqd\
         q5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w\
         3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
 
         assert_eq!(pay_request.prefix, "lnbc");
         assert_eq!(pay_request.amount, Some(250_000_000u64));
@@ -556,7 +610,7 @@ mod test {
         assert_eq!(pay_request.timestamp, 1496314658u64);
         assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
-            pay_request.description().unwrap().to_string(),
+            pay_request.description().unwrap(),
             "1 cup coffee".to_owned()
         );
         assert_eq!(pay_request.fallback_address(), None);
@@ -575,10 +629,10 @@ mod test {
             "lnbc20m1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqh\
              p58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqscc6gd6ql3jrc5yzme8v4ntcewwz5cnw9\
              2tz0pc8qcuufvq7khhr8wpald05e92xw006sq94mg8v2ndf4sefvf9sygkshp5zfem29trqq2yxxz7";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
-
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
 
         assert_eq!(pay_request.prefix, "lnbc");
         assert_eq!(pay_request.amount, Some(2000_000_000u64));
@@ -586,7 +640,7 @@ mod test {
         assert_eq!(pay_request.timestamp, 1496314658u64);
         assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
-            pay_request.description().unwrap().to_string(),
+            pay_request.description().unwrap(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
         );
         assert_eq!(pay_request.fallback_address(), None);
@@ -604,16 +658,18 @@ mod test {
             jmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfpp3x9et2e20v6pu37c5d9vax37wxq72un98k6\
             vcx9fz94w0qf237cm2rqv9pmn5lnexfvf5579slr4zq3u8kmczecytdx0xg9rwzngp7e6guwqpqlhssu04sucpnz4\
             axcv2dstmknqq6jsk2l";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
+
         assert_eq!(pay_request.prefix, "lntb");
         assert_eq!(pay_request.amount, Some(2000_000_000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
         assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
-            pay_request.description().unwrap().to_string(),
+            pay_request.description().unwrap(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
         );
         assert_eq!(
@@ -638,9 +694,11 @@ mod test {
             qxu92d8lr6fvg0r5gv0heeeqgcrqlnm6jhphu9y00rrhy4grqszsvpcgpy9qqqqqqgqqqqq7qqzqj9n4evl6mr5aj9\
             f58zp6fyjzup6ywn3x6sk8akg5v4tgn2q8g4fhx05wf6juaxu9760yp46454gpg5mtzgerlzezqcqvjnhjh8z3g2qq\
             dhhwkj";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
+
         let routing_info = Tag::RoutingInfo {
             path: vec![
                 ExtraHop {
@@ -670,7 +728,7 @@ mod test {
         assert_eq!(pay_request.timestamp, 1496314658u64);
         assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
-            pay_request.description().unwrap().to_string(),
+            pay_request.description().unwrap(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
         );
         assert_eq!(
@@ -698,9 +756,10 @@ mod test {
                 8yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfppj3a24vwu6r8ejrss3axul8rxldph2q7z9kk\
                 822r8plup77n9yq5ep2dfpcydrjwzxs0la84v3tfw43t3vqhek7f05m6uf8lmfkjn7zv7enn76sq65d8u9lxav2pl6\
                 x3xnc2ww3lqpagnh0u";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
 
         assert_eq!(pay_request.prefix, "lnbc");
         assert_eq!(pay_request.amount, Some(2000000000u64));
@@ -708,7 +767,7 @@ mod test {
         assert_eq!(pay_request.timestamp, 1496314658u64);
         assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
-            pay_request.description().unwrap().to_string(),
+            pay_request.description().unwrap(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
         );
         assert_eq!(
@@ -729,9 +788,10 @@ mod test {
                 yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfppqw508d6qejxtdg4y5r3zarvary0c5xw7kknt\
                 6zz5vxa8yh8jrnlkl63dah48yh6eupakk87fjdcnwqfcyt7snnpuz7vp83txauq4c60sys3xyucesxjf46yqnpplj\
                 0saq36a554cp9wt865";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
 
         assert_eq!(pay_request.prefix, "lnbc");
         assert_eq!(pay_request.amount, Some(2000000000u64));
@@ -739,7 +799,7 @@ mod test {
         assert_eq!(pay_request.timestamp, 1496314658u64);
         assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
-            pay_request.description().unwrap().to_string(),
+            pay_request.description().unwrap(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
         );
         assert_eq!(
@@ -761,16 +821,18 @@ mod test {
             jmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfp4qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4x\
             j0gdcccefvpysxf3qvnjha2auylmwrltv2pkp2t22uy8ura2xsdwhq5nm7s574xva47djmnj2xeycsu7u5v8929mvu\
             ux43j0cqhhf32wfyn2th0sv4t9x55sppz5we8";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
+
         assert_eq!(pay_request.prefix, "lnbc");
         assert_eq!(pay_request.amount, Some(2000000000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
         assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
-            pay_request.description().unwrap().to_string(),
+            pay_request.description().unwrap(),
             "3925b6f67e2c340036ed12093dd44e0368df1b6ea26c53dbe4811f58fd5db8c1".to_owned()
         );
         assert_eq!(
@@ -791,9 +853,11 @@ mod test {
             p58yjmdan79s6qqdhdzgynm4zwqd5d7xmw5fk98klysy043l2ahrqsfp4qrp33g0q5c5txsp9arysrx4k6zdkfs4nc\
             e4xj0gdcccefvpysxf3q90qkf3gd7fcqs0ewr7t3xf72ptmc4n38evg0xhy4p64nlg7hgrmq6g997tkrvezs8afs0\
             x0y8v4vs8thwsk6knkvdfvfa7wmhhpcsxcqw0ny48";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
+
         assert_eq!(pay_request.prefix, "lnbc");
         assert_eq!(pay_request.amount, Some(2000000000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
@@ -822,16 +886,18 @@ mod test {
         let tx_ref = "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqyp\
         qdpquwpc4curk03c9wlrswe78q4eyqc7d8d0xqzpuyk0sg5g70me25alkluzd2x62aysf2pyy8edtjeevuv4p2d5p7\
         6r4zkmneet7uvyakky2zr4cusd45tftc9c5fh0nnqpnl2jfll544esqchsrny";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
         let payment_hash =
             from_hex("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
+
         assert_eq!(pay_request.prefix, "lnbc");
         assert_eq!(pay_request.amount, Some(250_000_000u64));
         assert_eq!(pay_request.payment_hash(), Some(payment_hash));
         assert_eq!(pay_request.timestamp, 1496314658u64);
         assert!(pay_request.node_id.eq(&PUB_KEY));
         assert_eq!(
-            pay_request.description().unwrap().to_string(),
+            pay_request.description().unwrap(),
             "ナンセンス 1杯".to_owned()
         );
         assert_eq!(pay_request.expiry(), Some(60));
@@ -848,7 +914,7 @@ mod test {
         let tx_ref = "lnbc1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2p\
         kx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq8rkx3yf5tcsyz3d73gafnh3cax9r\
         n449d9p5uxz9ezhhypd0elx87sjle52x86fux2ypatgddc6k63n7erqz25le42c4u4ecky03ylcqca784w";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
 
         let new_pay_request = PaymentRequest::new(
             pay_request.prefix.clone(),
@@ -871,14 +937,14 @@ mod test {
         let tx_ref = "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqd\
         q5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w\
         3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp";
-        let pay_request = PaymentRequest::decode(&tx_ref).unwrap();
+        let pay_request = PaymentRequest::decode(tx_ref).unwrap();
 
         let new_pay_request = PaymentRequest::new(
             pay_request.prefix.clone(),
             pay_request.amount.clone(),
             pay_request.payment_hash().unwrap(),
             &SEC_KEY,
-            pay_request.description().unwrap().to_string(),
+            pay_request.description().unwrap(),
             pay_request.fallback_address(),
             pay_request.expiry(),
             pay_request.routing_info(),

@@ -1,4 +1,3 @@
-#[macro_export]
 /// Creates a HashMap containing the arguments
 ///
 /// - Create a HashMap containing a given list of elements:
@@ -16,7 +15,14 @@ macro_rules! hashmap {
     }}
 }
 
-/// verify that an expression matches a patter
+/// Verify that an expression matches a pattern
+///
+/// ```
+/// let a = Some(42);
+/// let b = Some(42);
+///
+/// assert!(matches!(a, b);
+///
 macro_rules! matches {
     ($e:expr, $p:pat) => (
         match $e {

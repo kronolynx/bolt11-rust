@@ -1,4 +1,4 @@
-use types::U5;
+use utils::U5;
 
 /// seconds-since-1970 (35 bits, big-endian)
 pub struct Timestamp;

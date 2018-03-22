@@ -1,13 +1,14 @@
-//! Tag
+//! PaymentRequest tagged fields.
 
-use types::{Error, U5, U5Conversions, U64VecU5Conversions, U8Conversions};
+use types::Error;
+use utils::{U5, U5Conversions, U64VecU5Conversions, U8Conversions};
 use std::collections::HashMap;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use itertools::Itertools;
 
-/// Bech32 alphabet
+/// Bech32 alphabet.
 lazy_static! {
-    pub static ref BECH32_ALPHABET: HashMap<char, u8> =
+    static ref BECH32_ALPHABET: HashMap<char, u8> =
         hashmap!['q' => 0,'p' => 1,'z' => 2,'r' => 3,'y' => 4,'9' => 5,'x' => 6,'8' => 7,'g' => 8,
         'f' => 9,'2' => 10,'t' => 11,'v' => 12,'d' => 13,'w' => 14,'0' => 15,'s' => 16,'3' => 17,
         'j' => 18,'n' => 19,'5' => 20,'4' => 21,'k' => 22,'h' => 23, 'c' => 24, 'e' => 25,'6' => 26,
@@ -15,69 +16,75 @@ lazy_static! {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-/// Tag
+/// PaymentRequest tagged fields.
 pub enum Tag {
-    /// Payment Hash Tag
+    /// `'p'`  256-bit SHA256 payment_hash. Preimage of this provides proof of payment.
     PaymentHash {
-        /// `hash` payment hash
+        /// `hash` payment hash.
         hash: Vec<u8>,
     },
 
-    /// Description Tag
+    /// `'d'`  Short description of purpose of payment (UTF-8), e.g. '1 cup of coffee' or
+    /// 'ナンセンス 1杯'. <br>
+    /// *Note:* must be included if DescriptionHash is not provided.
     Description {
-        ///  `description` a free-format string that will be included in the payment request
+        ///  `description` Free-format string that will be included in the payment request.
         description: String,
     },
 
-    /// Hash Tag
+    /// `'h'`   256-bit description of purpose of payment (SHA256). This is used to commit to an
+    /// associated description that is over 639 bytes, but the transport mechanism for the
+    /// description in that case is transport specific and not defined here. <br>
+    /// *Note:* must be included if Description is not provided.
     DescriptionHash {
-        /// `hash` hash that will be included in the payment request, and can be checked against
-        ///  the hash of a long description, an invoice, ...
+        /// `hash` Hash that will be included in the payment request, and can be checked against
+        ///  the hash of a long description, an invoice.
         hash: Vec<u8>,
     },
 
-    /// Fallback Payment Tag that specifies a fallback payment address to be used if LN payment
-    /// cannot be processed
+    /// `'f'`  Fallback on-chain address: for bitcoin, this starts with a 5-bit version and
+    /// contains a witness program or P2PKH or P2SH address.
     FallbackAddress {
-        /// `version` address version; valid values are
-        ///               - 17 (pubkey hash)
-        ///               - 18 (script hash)
+        /// `version` Address version; valid values are: <br>
+        ///               - 17 (pubkey hash) <br>
+        ///               - 18 (script hash) <br>
         ///               - 0 (segwit hash: p2wpkh (20 bytes) or p2wsh (32 bytes))
         version: u8,
-        /// `hash`    address hash
+        /// `hash`    Address hash
         hash: Vec<u8>,
     },
 
-    /// Expiry Date
+    /// `'x'`  Expiry time in seconds (big-endian). Default is 3600 (1 hour) if not specified.
     Expiry {
-        /// `seconds` expiry data for this payment request
+        /// `seconds` Expiry data for this payment request.
         seconds: u64,
     },
 
-    /// Min final CLTV expiry
-    /// specifies the delta between the current height and the HLTC extended to the receiver.
+    /// `'c'`  min_final_cltv_expiry to use for the last HTLC in the route. Default is 9
+    /// if not specified.
     MinFinalCltvExpiry {
-        /// `blocks` min final cltv expiry, in blocks
+        /// `blocks` min_final_cltv_expiry, in blocks.
         blocks: u64,
     },
 
-    /// Routing Info Tag
+    /// `'r'` One or more entries containing extra routing information for a private route;
+    /// there may be more than one r field.
     RoutingInfo {
-        ///  `path` one or more entries containing extra routing information for a private route
+        ///  `path` One or more entries containing extra routing information for a private route.
         path: Vec<ExtraHop>,
     },
 
-    /// unknown tag
+    /// Unknown tag.
     UnknownTag {
-        /// `tag` unknown tag
+        /// `tag` Unknown tag.
         tag: U5,
-        /// `bytes` content bytes
+        /// `bytes` Content bytes.
         bytes: Vec<U5>,
     },
 }
 
 impl Tag {
-    /// convert to u5 vector
+    /// Convert to a u5 vector.
     pub fn to_vec_u5(&self) -> Result<Vec<U5>, Error> {
         match &self {
             &&Tag::PaymentHash { ref hash } => {
@@ -130,7 +137,7 @@ impl Tag {
                 .map(|size| [vec![tag], size, bytes.to_owned()].concat()),
         }
     }
-    // helper for to_vec_u5
+    // Helper for to_vec_u5.
     fn vec_u5_aux(value: u8, data: Result<Vec<u8>, Error>) -> Result<Vec<U5>, Error> {
         match data {
             Ok(bytes) => {
@@ -143,6 +150,7 @@ impl Tag {
         }
     }
 
+    // Write the size into u5 vector
     fn write_size(size: usize) -> Result<Vec<U5>, Error> {
         let output = (size as u64).to_u5_vec();
         match output.len() {
@@ -157,7 +165,7 @@ impl Tag {
 }
 
 impl Tag {
-    /// parse Tag from u5 vector
+    /// Parse a Tag from a u5 vector.
     pub fn parse(input: &Vec<U5>) -> Result<Tag, Error> {
         let tag = *input
             .get(0)
@@ -217,7 +225,7 @@ impl Tag {
             }),
         }
     }
-    /// parse multiple tags from a u5 vector
+    /// Parse multiple tags from a u5 vector.
     pub fn parse_all(input: &Vec<U5>) -> Result<Vec<Tag>, Error> {
         let mut raw_tags = Vec::<Vec<U5>>::new();
         let mut data = &input[..];
@@ -239,24 +247,25 @@ impl Tag {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-/// entries containing extra routing information for a private route
+/// Entries containing extra routing information for a private route.
 pub struct ExtraHop {
-    /// public key (264 bits)
+    /// Public key (264 bits).
     pub pub_key: Vec<u8>,
+    /// Channel ID of the channel.
     pub short_channel_id: u64,
-    /// big endian
+    /// Base fee in millisatoshis required for routing along this channel.
     pub fee_base_msat: u32,
-    /// big endian
+    /// Proportional fee in millionths of a satoshi required for routing along this channel.
     pub fee_proportional_millionths: u32,
-    /// big endian
+    /// Is this channel's cltv expiry delta.
     pub cltv_expiry_delta: u16,
 }
 
 impl ExtraHop {
     /// 33 + 8 + 4 + 4 + 2
-    pub const CHUNK_LENGTH: usize = 51;
+    const CHUNK_LENGTH: usize = 51;
 
-    /// pack into Vec<u8>
+    /// Pack into Vec<u8>.
     pub fn pack(&self) -> Result<Vec<u8>, Error> {
         let mut wtr: Vec<u8> = vec![];
         wtr.write_u64::<BigEndian>(self.short_channel_id)?;
@@ -266,7 +275,7 @@ impl ExtraHop {
         Ok([self.pub_key.to_owned(), wtr].concat())
     }
 
-    /// parse u8 slice into ExtraHop
+    /// Parse a u8 slice into an ExtraHop.
     pub fn parse(data: &[u8]) -> ExtraHop {
         let pub_key = data[0..33].to_owned();
         let short_channel_id = BigEndian::read_u64(&data[33..41]);
@@ -282,7 +291,7 @@ impl ExtraHop {
         }
     }
 
-    /// parse a vec<u8> into a vec<ExtraHop>
+    /// Parse a vec<u8> into a vec<ExtraHop>.
     pub fn parse_all(data: Vec<u8>) -> Vec<ExtraHop> {
         data
             .chunks(ExtraHop::CHUNK_LENGTH)
