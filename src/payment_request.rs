@@ -198,14 +198,14 @@ impl PaymentRequest {
 
     /// Return the extra routing info.
     pub fn routing_info(&self) -> Vec<ExtraHop> {
-        self.tags
-            .iter()
-            .filter_map(|v| match *v {
-                Tag::RoutingInfo { ref path } => Some(path.to_owned()),
-                _ => None,
-            })
-            .flatten()
-            .collect_vec()
+        Itertools::flatten(
+            self.tags
+                .iter()
+                .filter_map(|v| match *v {
+                    Tag::RoutingInfo { ref path } => Some(path.to_owned()),
+                    _ => None,
+                })
+         ).collect_vec()
     }
 
     /// Return the min_final_cltv_expiry if any.
