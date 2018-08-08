@@ -59,7 +59,6 @@ impl Amount {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
     fn minimal_amount_used() {

@@ -517,8 +517,7 @@ impl fmt::Display for Description {
 #[cfg(test)]
 mod test {
     use super::*;
-    use lazy_static;
-    use utils::{from_hex, to_hex};
+    use utils::from_hex;
 
     lazy_static!{
          static ref SEC_KEY: secp256k1::SecretKey = {
